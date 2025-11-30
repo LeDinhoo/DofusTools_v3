@@ -5,6 +5,7 @@ import time
 import os
 import re
 import logging
+from PIL import Image, ImageTk
 
 # Imports des modules systèmes
 from scripts.mouse_features import MouseScripts
@@ -15,13 +16,13 @@ from scripts.parser_features import ParserScripts
 from scripts.network_features import NetworkFeatures
 from scripts.session_features import SessionFeatures
 from scripts.ocr_features import OcrScripts
+from scripts.overlay_features import OverlayScripts
+from scripts.snipping_tool import SnippingTool
 
-# --- IMPORT DES PANNEAUX ---
 from .panels.sidebar import SidebarPanel
 from .panels.guide_view import GuidePanel
 from .panels.logger import LoggerPanel
 
-# Configuration du logger pour ce fichier
 logger = logging.getLogger(__name__)
 
 
@@ -36,46 +37,46 @@ class AppLauncher:
         self.show_left = True
         self.show_right = True
         self.next_travel_command = None
+        self.debug_window_ref = None
 
-        # --- 1. INITIALISATION DES CONTROLEURS ---
-        # (Déplacé AVANT setup_ui pour que la Sidebar puisse accéder à self.keyboard/mouse)
+        self.ocr_zone_rect = None
+        # Variable pour empêcher les boucles lors de l'init
+        self.is_restoring_session = False
+        self.is_macro_running = False
+
+        # --- 1. INITIALISATION ---
         self.parser = ParserScripts()
         self.mouse = MouseScripts()
         self.system = SystemScripts()
         self.window = WindowScripts()
         self.network = NetworkFeatures()
 
-        # Injection de dépendances spécifiques
         self.keyboard = KeyboardScripts(window_manager=self.window)
         self.session = SessionFeatures(parser_script=self.parser)
         self.ocr = OcrScripts()
+        self.overlay = OverlayScripts(self.root)
+        self.snipping = SnippingTool(self.root)
 
         # --- 2. SETUP UI ---
-        # (Crée les panneaux, dont la Sidebar qui utilise les contrôleurs)
         self.setup_ui()
 
         # --- 3. SETUP LOGGING ---
-        # (Configure le logger et l'attache au LoggerPanel maintenant créé)
         self.setup_logging()
 
         # --- 4. STARTUP ---
-        self.root.after(100, self.restore_session_ui)
-        logger.info("Système chargé (Architecture v2).")
+        # On laisse un peu plus de temps à Tkinter pour s'initialiser (200ms)
+        self.root.after(200, self.restore_session_ui)
+        logger.info("Système chargé (Architecture v2 + Overlay + Snipping + ZoneConfig).")
 
     def setup_logging(self):
-        """Configure le système de log global"""
         root_logger = logging.getLogger()
         root_logger.setLevel(logging.INFO)
-
-        # Nettoyage des handlers existants pour éviter les doublons si rappelée
         root_logger.handlers.clear()
 
-        # Handler Console (Debug)
         console_handler = logging.StreamHandler()
         console_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
         root_logger.addHandler(console_handler)
 
-        # Handler UI (Panel)
         if hasattr(self, 'ui_logger'):
             root_logger.addHandler(self.ui_logger.handler)
 
@@ -120,24 +121,106 @@ class AppLauncher:
     # =========================================================================
     #                             WRAPPERS D'ACTIONS
     # =========================================================================
-    # Ces méthodes sont appelées par la Sidebar. Elles décident du Threading.
 
     def run_threaded(self, func):
         threading.Thread(target=func, daemon=True).start()
 
     def action_load_json_wrapper(self):
-        # Exécuté sur le thread principal car ouvre une popup système
         self.action_charger_json()
 
     def action_bind_window_wrapper(self):
-        target = self.ui_sidebar.bind_entry.get()
-        self.run_threaded(lambda: self.window.bind_window(target))
+        target = self.ui_sidebar.bind_entry.get().strip()
+        if not target:
+            logger.warning("Liaison : Aucun nom de personnage saisi.")
+            self.ui_sidebar.update_bind_status("error")
+            return
+
+        def _task():
+            success = self.window.bind_window(target)
+            if success:
+                self.session.save_last_character(target)
+                self.root.after(0, lambda: self.ui_sidebar.update_bind_status("success"))
+            else:
+                self.root.after(0, lambda: self.ui_sidebar.update_bind_status("error"))
+
+        self.run_threaded(_task)
+
+    def show_debug_image(self, image_path):
+        if not image_path or not os.path.exists(image_path): return
+
+        if self.debug_window_ref and self.debug_window_ref.winfo_exists():
+            self.debug_window_ref.destroy()
+
+        top = tk.Toplevel(self.root)
+        top.title(f"Debug OCR : {os.path.basename(image_path)}")
+        top.geometry("600x400")
+
+        try:
+            pil_img = Image.open(image_path)
+            pil_img.thumbnail((800, 600))
+            tk_img = ImageTk.PhotoImage(pil_img)
+
+            lbl = tk.Label(top, image=tk_img, bg="black")
+            lbl.image = tk_img
+            lbl.pack(fill="both", expand=True)
+            self.debug_window_ref = top
+        except Exception as e:
+            logger.error(f"Erreur affichage debug: {e}")
+
+    def action_define_ocr_zone_wrapper(self):
+        """Lance l'outil de sélection pour définir la zone d'écoute"""
+
+        def on_zone_selected(zone_rect):
+            self.ocr_zone_rect = zone_rect
+            # Sauvegarde de la zone dans la session
+            self.session.save_ocr_zone(zone_rect)
+
+            self.overlay.draw_zone(zone_rect[0], zone_rect[1], zone_rect[2], zone_rect[3], color="#00ff00", alpha=0.2,
+                                   duration=2000)
+            logger.info(f"Zone OCR configurée et sauvegardée : {zone_rect}")
+
+        logger.info("Veuillez sélectionner la zone de texte à surveiller...")
+        self.snipping.start_selection(on_zone_selected)
 
     def action_ocr_wrapper(self):
         target = self.ui_sidebar.ocr_target_entry.get()
-        self.run_threaded(lambda: self.ocr.run_ocr_for_key_Z(
-            self.window, self.keyboard, target=target
-        ))
+        raw_thresh = self.ui_sidebar.ocr_threshold_entry.get()
+        is_grayscale = self.ui_sidebar.var_grayscale.get()
+
+        try:
+            threshold = int(raw_thresh)
+        except ValueError:
+            threshold = 200
+
+        def _task():
+            self.root.after(0, self.overlay.clear_all)
+
+            if self.ocr_zone_rect:
+                logger.info(f"Lancement OCR sur zone configurée : {self.ocr_zone_rect}")
+            else:
+                logger.info("Lancement OCR sur fenêtre complète (Aucune zone définie)")
+
+            coords, debug_path = self.ocr.run_ocr_for_key_Z(
+                self.window, self.keyboard,
+                threshold=threshold,
+                target=target,
+                zone_rect=self.ocr_zone_rect,
+                grayscale=is_grayscale
+            )
+
+            if debug_path:
+                self.root.after(0, lambda: self.show_debug_image(debug_path))
+
+            if coords:
+                x, y = coords
+                self.overlay.draw_dot(x, y, color="#ff0000", size=20, duration=10000)
+                logger.info(f"📍 Cible localisée en ({x}, {y})")
+
+        self.run_threaded(_task)
+
+    def action_test_overlay_wrapper(self):
+        self.overlay.draw_dot(960, 540, color="#00ff00", size=15, duration=2000)
+        self.overlay.draw_zone(100, 100, 200, 100, color="red", duration=2000)
 
     def action_click_center_wrapper(self):
         self.run_threaded(self.mouse.click_centre)
@@ -171,6 +254,9 @@ class AppLauncher:
         self.show_right = not self.show_right
 
     def refresh_ui_state(self):
+        # Sécurité pour éviter de rafraîchir en boucle pendant l'init
+        if self.is_restoring_session: return
+
         self.ui_guide.update_tabs(self.session.open_guides, self.session.active_index)
         guide = self.session.get_active_guide()
         self.ui_guide.update_content(guide, self.parser)
@@ -187,6 +273,8 @@ class AppLauncher:
             if match:
                 x, y = match.group(2), match.group(3)
                 self.next_travel_command = f"/travel {x},{y}"
+                # On ne logue la détection que si ce n'est pas le tout premier chargement silencieux
+                # Mais c'est une info utile, donc on garde le log.
                 logger.info(f"🔔 Commande détectée : {match.group(1).strip()}")
 
     def nav_previous(self):
@@ -197,39 +285,58 @@ class AppLauncher:
             self.refresh_ui_state()
 
     def nav_next(self):
+        if self.is_macro_running:
+            logger.warning("⏳ Macro en cours, veuillez patienter...")
+            return
+
         guide = self.session.get_active_guide()
         if guide and guide['current_idx'] < len(guide['steps']) - 1:
-            if self.next_travel_command:
-                self.run_threaded(self.macro_travel_to_stored_command)
+            cmd_to_run = self.next_travel_command
+
+            # --- MODIFICATION ---
+            # On lance la macro UNIQUEMENT si l'utilisateur clique sur Suivant
+            # et qu'une commande est prête.
+            if cmd_to_run:
+                self.run_threaded(lambda: self.macro_travel_to_stored_command(cmd_to_run))
 
             guide['current_idx'] += 1
             self.session.save_current_progress()
             self.refresh_ui_state()
+
         elif guide and guide['current_idx'] == len(guide['steps']) - 1:
             logger.info("ℹ️ Dernière étape du guide atteinte.")
             self.refresh_ui_state()
 
-    def macro_travel_to_stored_command(self):
-        if not self.next_travel_command: return
-        if not self.window.bound_handle:
-            logger.warning("⚠️ Fenêtre non liée pour la macro.")
+    def macro_travel_to_stored_command(self, cmd_string):
+        if not cmd_string: return
+
+        # Double vérification : Si on restaure la session, on interdit le travel automatique
+        if self.is_restoring_session:
             return
 
-        try:
-            cmd = self.next_travel_command
-            logger.info(f"🚀 MACRO START ({cmd})")
+        if not self.window.bound_handle:
+            logger.warning("⚠️ MACRO ABANDONNÉE : Aucune fenêtre liée.")
+            return
 
+        self.is_macro_running = True  # Lock
+        try:
+            if not self.window.ensure_focus():
+                logger.error("❌ MACRO ABANDONNÉE : Impossible de focus la fenêtre Dofus.")
+                return
+
+            logger.info(f"🚀 MACRO START ({cmd_string})")
             self.keyboard.press_space()
             time.sleep(0.1)
-            self.keyboard.send_text(cmd)
+            self.keyboard.send_text(cmd_string)
             time.sleep(0.1)
             self.keyboard.press_enter()
             time.sleep(0.3)
             self.keyboard.press_enter()
-
             logger.info("✅ MACRO END")
         except Exception as e:
             logger.error(f"❌ Erreur Macro : {e}")
+        finally:
+            self.is_macro_running = False  # Unlock
 
     def switch_tab(self, index):
         self.session.set_active_index(index)
@@ -295,13 +402,49 @@ class AppLauncher:
             self.refresh_ui_state()
 
     def restore_session_ui(self):
-        guides, idx = self.session.load_last_session()
-        if guides:
-            for g in guides:
-                if g.get('file_path') and os.path.exists(g['file_path']):
-                    d = self.parser.load_file(g['file_path'])
-                    if d: self.session.add_guide(g['name'], self.parser.get_steps_list(d), g['file_path'], g['id'])
-            self.session.set_active_index(idx)
+        self.is_restoring_session = True
+        try:
+            guides, idx = self.session.load_last_session()
+            if guides:
+                for g in guides:
+                    if g.get('file_path') and os.path.exists(g['file_path']):
+                        d = self.parser.load_file(g['file_path'])
+                        if d: self.session.add_guide(g['name'], self.parser.get_steps_list(d), g['file_path'], g['id'])
+                self.session.set_active_index(idx)
+
+                # Mise à jour manuelle unique de l'UI des guides après chargement
+                self.ui_guide.update_tabs(self.session.open_guides, self.session.active_index)
+                guide = self.session.get_active_guide()
+                self.ui_guide.update_content(guide, self.parser)
+
+            last_char = self.session.get_last_character()
+            if last_char:
+                logger.info(f"Tentative de liaison auto avec : {last_char}")
+                self.ui_sidebar.bind_entry.delete(0, tk.END)
+                self.ui_sidebar.bind_entry.insert(0, last_char)
+                # On utilise un délai pour laisser le temps à l'UI d'être stable
+                # et on ne bloque pas si ça échoue
+                self.root.after(500, self.action_bind_window_wrapper)
+            else:
+                if not self.ui_sidebar.bind_entry.get():
+                    self.ui_sidebar.bind_entry.insert(0, "Nom du perso")
+
+            # RESTAURATION ZONE OCR (sécurisée)
+            last_zone = self.session.get_last_ocr_zone()
+            if last_zone and isinstance(last_zone, (list, tuple)) and len(last_zone) == 4:
+                # Assurons-nous que ce sont des entiers
+                try:
+                    self.ocr_zone_rect = tuple(map(int, last_zone))
+                    logger.info(f"Zone OCR restaurée : {self.ocr_zone_rect}")
+                except ValueError:
+                    logger.error(f"Zone OCR corrompue dans la session : {last_zone}")
+                    self.ocr_zone_rect = None
+            else:
+                self.ocr_zone_rect = None
+
+        finally:
+            self.is_restoring_session = False
+            # Une dernière mise à jour de l'état pour détecter les commandes travel
             self.refresh_ui_state()
 
     def copy_position(self, event):
