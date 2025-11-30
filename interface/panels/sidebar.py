@@ -74,7 +74,7 @@ class SidebarPanel(tk.Frame):
         self.ocr_threshold_entry = tk.Entry(ocr_frame, bg="#2b2b2b", fg="#4da6ff", insertbackground="white",
                                             relief="flat", width=4, justify="center")
         self.ocr_threshold_entry.pack(side="left", fill="y", ipady=3, padx=(0, 2))
-        self.ocr_threshold_entry.insert(0, "200")
+        self.ocr_threshold_entry.insert(0, "190")
 
         # --- Option Grayscale ---
         gray_frame = tk.Frame(self, bg="#121212")

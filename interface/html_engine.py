@@ -23,6 +23,9 @@ class HTMLRenderParser(HTMLParser):
         self.in_list_item = False
         self.in_image_span = False
 
+        # Tags à ignorer silencieusement pour éviter des artefacts (cases vides, inputs fantômes)
+        self.ignored_tags = {'input', 'label', 'meta', 'script', 'style', 'link', 'head', 'title'}
+
         # --- CONFIGURATION TAILLES IMAGES ---
         self.img_sizes = {
             "large": 200,  # Fallback si fit_width échoue
@@ -38,7 +41,23 @@ class HTMLRenderParser(HTMLParser):
             "monster": "👹", "npc": "👤", "job": "🔨"
         }
 
+    def _clean_data(self, text):
+        """Remplace les émojis problématiques par du texte simple pour éviter les carrés gris"""
+        replacements = {
+            "1️⃣": "1.", "2️⃣": "2.", "3️⃣": "3.", "4️⃣": "4.", "5️⃣": "5.",
+            "6️⃣": "6.", "7️⃣": "7.", "8️⃣": "8.", "9️⃣": "9.", "0️⃣": "0.",
+            "🔟": "10.", "⚠️": "/!\\", "👉": "->", "👈": "<-",
+            "🌽": "", "🥩": "", "☎️": "", "📖": ""  # Suppression de l'émoji livre parasite
+        }
+        for k, v in replacements.items():
+            text = text.replace(k, v)
+        return text
+
     def handle_starttag(self, tag, attrs):
+        # On ignore totalement certaines balises pour éviter les artefacts
+        if tag in self.ignored_tags:
+            return
+
         self.tags_stack.append(tag)
         attrs_dict = dict(attrs)
 
@@ -76,7 +95,7 @@ class HTMLRenderParser(HTMLParser):
             if gid == "0" and step_num:
                 self.current_link_id = f"STEP:{step_num}"
             elif gid and gid != "0":
-                self.text_widget.insert("end", "📖 ")
+                # Suppression de l'insertion manuelle de "📖 " ici
                 self.current_link_id = f"GUIDE:{gid}"
 
         # 3. IMAGES
@@ -133,7 +152,18 @@ class HTMLRenderParser(HTMLParser):
         if tag == 'br': self.text_widget.insert("end", "\n")
 
     def handle_endtag(self, tag):
-        if self.tags_stack: self.tags_stack.pop()
+        if tag in self.ignored_tags:
+            return
+
+        # Gestion robuste de la pile de tags
+        if self.tags_stack:
+            if tag in self.tags_stack:
+                while self.tags_stack and self.tags_stack[-1] != tag:
+                    self.tags_stack.pop()
+                if self.tags_stack: self.tags_stack.pop()
+            else:
+                pass
+
         if tag in ['b', 'strong']: self.is_bold = False
 
         if tag in ['p', 'div']:
@@ -157,6 +187,10 @@ class HTMLRenderParser(HTMLParser):
     def handle_data(self, data):
         if not data.strip() and not self.tags_stack: return
 
+        # Nettoyage des caractères problématiques (émojis carrés)
+        clean_text = self._clean_data(data)
+        if not clean_text: return
+
         tags = []
         if self.is_bold: tags.append("bold")
         if self.current_color:
@@ -176,7 +210,7 @@ class HTMLRenderParser(HTMLParser):
                 self.text_widget.tag_bind(link_tag, "<Button-1>",
                                           lambda e, lid=self.current_link_id: self.text_widget.on_link_click(lid))
 
-        self.text_widget.insert("end", data, tuple(tags))
+        self.text_widget.insert("end", clean_text, tuple(tags))
 
 
 class RichTextDisplay(scrolledtext.ScrolledText):
@@ -184,6 +218,9 @@ class RichTextDisplay(scrolledtext.ScrolledText):
         super().__init__(master, bg="#1e1e2e", fg="#c0c0c0",
                          insertbackground="white", bd=0, padx=15, pady=15,
                          font=("Segoe UI", 11, "bold"), wrap="word", **kwargs)
+
+        # Masquer la scrollbar tout en gardant le scroll actif
+        self.vbar.pack_forget()
 
         self.on_link_click = on_link_click
 

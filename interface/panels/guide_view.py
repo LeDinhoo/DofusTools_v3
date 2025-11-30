@@ -10,7 +10,8 @@ class GuidePanel(tk.Frame):
 
         # Variables liées à l'affichage
         self.var_position = tk.StringVar(value="")
-        self.var_step_display = tk.StringVar(value="-- / --")
+        self.var_current_step = tk.StringVar(value="--")
+        self.var_total_steps = tk.StringVar(value="/ --")
         self.var_guide_name = tk.StringVar(value="Aucun guide")
 
         self.setup_layout()
@@ -40,12 +41,28 @@ class GuidePanel(tk.Frame):
         nav_group = tk.Frame(nav_bar, bg="#252535")
         nav_group.grid(row=0, column=2, padx=10, sticky="e")
 
+        # --- NOUVEAU : Bouton Toggle Auto-Travel ---
+        self.btn_auto_travel = tk.Button(nav_group, text="✈️ Auto", command=self.toggle_auto_travel_ui,
+                                         bg="#252535", fg="#4da6ff", font=("Segoe UI", 9, "bold"),
+                                         relief="flat", activebackground="#3a3a4a", activeforeground="#4da6ff")
+        self.btn_auto_travel.pack(side="left", padx=(0, 10))
+        # -------------------------------------------
+
         self.btn_prev = RoundedButton(nav_group, text="<", command=self.controller.nav_previous,
                                       width=32, height=32, radius=12, bg_color="#252535", hover_color="#3a3a4a")
         self.btn_prev.pack(side="left", padx=5)
 
-        tk.Label(nav_group, textvariable=self.var_step_display,
-                 bg="#252535", fg="#4da6ff", font=("Consolas", 12, "bold"), width=10).pack(side="left", padx=5)
+        # Champ de saisie pour l'étape actuelle
+        self.entry_step = tk.Entry(nav_group, textvariable=self.var_current_step,
+                                   width=4, bg="#1e1e2e", fg="#4da6ff",
+                                   insertbackground="white", relief="flat",
+                                   justify="center", font=("Consolas", 12, "bold"))
+        self.entry_step.pack(side="left", padx=(5, 0), ipady=2)
+        self.entry_step.bind("<Return>", self.on_step_submit)
+
+        # Label pour le total
+        tk.Label(nav_group, textvariable=self.var_total_steps,
+                 bg="#252535", fg="#4da6ff", font=("Consolas", 12, "bold")).pack(side="left", padx=(0, 5))
 
         self.btn_next = RoundedButton(nav_group, text=">", command=self.controller.nav_next,
                                       width=32, height=32, radius=12, bg_color="#252535", hover_color="#3a3a4a")
@@ -55,7 +72,20 @@ class GuidePanel(tk.Frame):
         self.html_viewer = RichTextDisplay(self, on_link_click=self.controller.on_guide_link_clicked)
         self.html_viewer.pack(fill="both", expand=True, padx=0, pady=0)
 
-    # --- Mise à jour UI depuis le Controller ---
+    def toggle_auto_travel_ui(self):
+        """Active/Désactive l'auto-travel via le contrôleur et met à jour la couleur du bouton"""
+        is_enabled = self.controller.toggle_auto_travel()
+        new_color = "#4da6ff" if is_enabled else "#666666"  # Bleu si actif, Gris si inactif
+        self.btn_auto_travel.config(fg=new_color)
+
+    def on_step_submit(self, event=None):
+        try:
+            val = self.var_current_step.get()
+            self.controller.on_guide_link_clicked(f"STEP:{val}")
+            self.focus_set()
+        except Exception:
+            pass
+
     def update_tabs(self, guides, active_idx):
         for widget in self.tabs_container.winfo_children(): widget.destroy()
 
@@ -79,20 +109,24 @@ class GuidePanel(tk.Frame):
             c.bind("<Button-1>", lambda e, x=i: self.controller.close_tab(x))
 
     def update_content(self, guide_data, parser):
-        # Mise à jour de l'affichage HTML et des compteurs
-        # Note: Le contrôleur passera ici les données brutes
         if not guide_data:
-            self.var_step_display.set("-- / --")
+            self.var_current_step.set("--")
+            self.var_total_steps.set("/ --")
             self.var_position.set("")
             self.html_viewer.set_html("")
             self.btn_prev.set_state("disabled")
             self.btn_next.set_state("disabled")
+            self.entry_step.config(state="disabled", bg="#252535")
             return
+
+        self.entry_step.config(state="normal", bg="#1e1e2e")
 
         steps = guide_data['steps']
         idx = guide_data['current_idx']
 
-        self.var_step_display.set(f"{idx + 1} / {len(steps)}")
+        self.var_current_step.set(str(idx + 1))
+        self.var_total_steps.set(f"/ {len(steps)}")
+
         self.btn_prev.set_state("normal" if idx > 0 else "disabled")
         self.btn_next.set_state("normal" if idx < len(steps) - 1 else "disabled")
 

@@ -50,7 +50,7 @@ class OcrScripts:
         if not text: return ""
         return re.sub(r'[^a-zA-Z0-9]', '', text).lower()
 
-    def _fuzzy_match(self, target, text, min_ratio=0.75):
+    def _fuzzy_match(self, target, text, min_ratio=0.95):
         if not target or not text: return False
 
         # 1. Comparaison standard
