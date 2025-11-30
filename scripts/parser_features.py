@@ -1,11 +1,14 @@
 import json
 import os
 import re
+import logging
 
+logger = logging.getLogger(__name__)
 
 class ParserScripts:
-    def __init__(self, logger_func):
-        self.log = logger_func
+    def __init__(self):
+        # Plus de dépendance logger_func
+        pass
 
     # --- PARSING & LECTURE ---
 
@@ -15,7 +18,7 @@ class ParserScripts:
             data = json.loads(json_content)
             return data
         except json.JSONDecodeError as e:
-            self.log(f"Parser Erreur : JSON invalide ({e})")
+            logger.error(f"Parser Erreur : JSON invalide ({e})")
             return None
 
     def load_file(self, file_path):
@@ -28,7 +31,7 @@ class ParserScripts:
                 data = json.load(f)
             return data
         except Exception as e:
-            self.log(f"Parser Erreur lecture : {e}")
+            logger.error(f"Parser Erreur lecture : {e}")
             return None
 
     # --- ÉCRITURE & SAUVEGARDE ---
@@ -43,7 +46,7 @@ class ParserScripts:
                 json.dump(data, f, indent=4, ensure_ascii=False)
             return True
         except Exception as e:
-            self.log(f"Erreur sauvegarde : {e}")
+            logger.error(f"Erreur sauvegarde : {e}")
             return False
 
     def save_guide_to_library(self, data, folder="guides"):
@@ -60,7 +63,7 @@ class ParserScripts:
         full_path = os.path.join(folder, safe_filename)
 
         if self.save_file(full_path, data):
-            self.log(f"📚 Guide archivé : {safe_filename}")
+            logger.info(f"📚 Guide archivé : {safe_filename}")
             return full_path
         return None
 
