@@ -11,7 +11,8 @@ class GuidePanel(tk.Frame):
         # Variables liées à l'affichage
         self.var_position = tk.StringVar(value="")
         self.var_current_step = tk.StringVar(value="--")
-        self.var_total_steps = tk.StringVar(value="/ --")
+        # Suppression du slash initial
+        self.var_total_steps = tk.StringVar(value="--")
         self.var_guide_name = tk.StringVar(value="Aucun guide")
 
         self.setup_layout()
@@ -22,7 +23,7 @@ class GuidePanel(tk.Frame):
         self.tabs_container.pack(fill="x", side="top")
 
         # 2. Header de Navigation
-        nav_bar = tk.Frame(self, bg="#252535", height=40)
+        nav_bar = tk.Frame(self, bg="#252535", height=50)
         nav_bar.pack(fill="x", side="top")
         nav_bar.pack_propagate(False)
 
@@ -34,58 +35,81 @@ class GuidePanel(tk.Frame):
         # Position (Gauche)
         self.lbl_position = tk.Label(nav_bar, textvariable=self.var_position,
                                      bg="#252535", fg="#ffd700", font=("Segoe UI", 12, "bold"), cursor="hand2")
-        self.lbl_position.grid(row=0, column=0, padx=15, sticky="w")
+        self.lbl_position.grid(row=0, column=0, padx=12, sticky="w")
         self.lbl_position.bind("<Button-1>", self.controller.copy_position)
 
         # Navigation (Droite)
         nav_group = tk.Frame(nav_bar, bg="#252535")
         nav_group.grid(row=0, column=2, padx=10, sticky="e")
 
-        # --- NOUVEAU : Bouton Toggle Auto-Travel ---
-        self.btn_auto_travel = tk.Button(nav_group, text="✈️ Auto", command=self.toggle_auto_travel_ui,
-                                         bg="#252535", fg="#4da6ff", font=("Segoe UI", 9, "bold"),
-                                         relief="flat", activebackground="#3a3a4a", activeforeground="#4da6ff")
-        self.btn_auto_travel.pack(side="left", padx=(0, 10))
-        # -------------------------------------------
+        # Bouton Précédent (Arrondi)
+        self.btn_prev = RoundedButton(nav_group, text="◀", command=self.controller.nav_previous,
+                                      width=30, height=30, radius=8,
+                                      bg_color="#252535", hover_color="#3a3a4a", fg_color="white")
+        self.btn_prev.pack(side="left", padx=2)
 
-        self.btn_prev = RoundedButton(nav_group, text="<", command=self.controller.nav_previous,
-                                      width=32, height=32, radius=12, bg_color="#252535", hover_color="#3a3a4a")
-        self.btn_prev.pack(side="left", padx=5)
+        # Container central pour Input Etape / Total Etapes (Vertical)
+        step_info_frame = tk.Frame(nav_group, bg="#252535")
+        step_info_frame.pack(side="left", padx=5)
 
-        # Champ de saisie pour l'étape actuelle
-        self.entry_step = tk.Entry(nav_group, textvariable=self.var_current_step,
-                                   width=4, bg="#1e1e2e", fg="#4da6ff",
+        # Input Etape (Au-dessus)
+        self.entry_step = tk.Entry(step_info_frame, textvariable=self.var_current_step,
+                                   width=4, bg="#252535", fg="#4da6ff",
                                    insertbackground="white", relief="flat",
-                                   justify="center", font=("Consolas", 12, "bold"))
-        self.entry_step.pack(side="left", padx=(5, 0), ipady=2)
+                                   justify="center", font=("Consolas", 10, "bold"))
+        self.entry_step.pack(side="top", fill="x", pady=0)
         self.entry_step.bind("<Return>", self.on_step_submit)
 
-        # Label pour le total
-        tk.Label(nav_group, textvariable=self.var_total_steps,
-                 bg="#252535", fg="#4da6ff", font=("Consolas", 12, "bold")).pack(side="left", padx=(0, 5))
+        # Total Etapes (En-dessous, sans slash)
+        self.lbl_total = tk.Label(step_info_frame, textvariable=self.var_total_steps,
+                                  bg="#252535", fg="#888888", font=("Consolas", 10), width=6)
+        self.lbl_total.pack(side="bottom", fill="x", pady=0)
 
-        self.btn_next = RoundedButton(nav_group, text=">", command=self.controller.nav_next,
-                                      width=32, height=32, radius=12, bg_color="#252535", hover_color="#3a3a4a")
-        self.btn_next.pack(side="left", padx=5)
+        # Bouton Suivant (Arrondi)
+        self.btn_next = RoundedButton(nav_group, text="▶", command=self.controller.nav_next,
+                                      width=30, height=30, radius=8,
+                                      bg_color="#252535", hover_color="#3a3a4a", fg_color="white")
+        self.btn_next.pack(side="left", padx=2)
+
+        # Bouton Auto-Travel (Arrondi avec icône centrée)
+        self.btn_auto_travel = RoundedButton(nav_group, text="✈", command=self.toggle_auto_travel_ui,
+                                             width=30, height=30, radius=8,
+                                             bg_color="#252535", hover_color="#3a3a4a", fg_color="#666666")
+        self.btn_auto_travel.pack(side="left", padx=(10, 0))
+
+        # Initialisation état bouton avion
+        self.update_auto_travel_btn_state()
 
         # 3. Viewer HTML
         self.html_viewer = RichTextDisplay(self, on_link_click=self.controller.on_guide_link_clicked)
         self.html_viewer.pack(fill="both", expand=True, padx=0, pady=0)
 
     def toggle_auto_travel_ui(self):
-        """Active/Désactive l'auto-travel via le contrôleur et met à jour la couleur du bouton"""
-        is_enabled = self.controller.toggle_auto_travel()
-        new_color = "#4da6ff" if is_enabled else "#666666"  # Bleu si actif, Gris si inactif
-        self.btn_auto_travel.config(fg=new_color)
+        """Bascule l'état et met à jour l'apparence"""
+        self.controller.toggle_auto_travel()
+        self.update_auto_travel_btn_state()
+
+    def update_auto_travel_btn_state(self):
+        """Met à jour la couleur du bouton avion selon l'état du contrôleur"""
+        is_enabled = self.controller.is_auto_travel_enabled
+        if is_enabled:
+            self.btn_auto_travel.fg_color = "#00ff00"  # Vert si actif
+        else:
+            self.btn_auto_travel.fg_color = "#666666"  # Gris si inactif
+        self.btn_auto_travel.draw()
 
     def on_step_submit(self, event=None):
+        """Appelé quand l'utilisateur appuie sur Entrée dans le champ d'étape"""
         try:
             val = self.var_current_step.get()
             self.controller.on_guide_link_clicked(f"STEP:{val}")
+
+            # On redonne le focus à la fenêtre principale pour réactiver les raccourcis A/D
             self.focus_set()
         except Exception:
             pass
 
+    # --- Mise à jour UI depuis le Controller ---
     def update_tabs(self, guides, active_idx):
         for widget in self.tabs_container.winfo_children(): widget.destroy()
 
@@ -111,21 +135,24 @@ class GuidePanel(tk.Frame):
     def update_content(self, guide_data, parser):
         if not guide_data:
             self.var_current_step.set("--")
-            self.var_total_steps.set("/ --")
+            self.var_total_steps.set("--")
             self.var_position.set("")
             self.html_viewer.set_html("")
             self.btn_prev.set_state("disabled")
             self.btn_next.set_state("disabled")
+            # Désactiver l'input si aucun guide
             self.entry_step.config(state="disabled", bg="#252535")
             return
 
-        self.entry_step.config(state="normal", bg="#1e1e2e")
+        # Réactiver l'input
+        self.entry_step.config(state="normal", bg="#252535")
 
         steps = guide_data['steps']
         idx = guide_data['current_idx']
 
+        # Mise à jour des variables texte
         self.var_current_step.set(str(idx + 1))
-        self.var_total_steps.set(f"/ {len(steps)}")
+        self.var_total_steps.set(f"{len(steps)}")
 
         self.btn_prev.set_state("normal" if idx > 0 else "disabled")
         self.btn_next.set_state("normal" if idx < len(steps) - 1 else "disabled")
