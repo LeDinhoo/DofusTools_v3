@@ -69,34 +69,66 @@ class KeyboardScripts:
             self.window_manager.ensure_focus()
             time.sleep(0.05)
 
-    def press_key(self, hexKeyCode, duration=0.05, extended=False):
-        """
-        Appuie sur une touche (Mode Gamer : ScanCode)
-        """
-        self._prepare_context()
-
-        # 1. Conversion Virtual Key -> Scan Code
+    def _get_key_input(self, hexKeyCode, extended=False):
+        """Prépare la structure INPUT commune pour la touche."""
         scan_code = self.user32.MapVirtualKeyW(hexKeyCode, 0)
-
-        # Gestion des touches étendues (Flèches, Suppr, etc.)
         flags = KEYEVENTF_SCANCODE
         if extended:
             flags |= KEYEVENTF_EXTENDEDKEY
 
-        # 2. Appui (Down)
         x = INPUT()
         x.type = INPUT_KEYBOARD
         x.ui.ki.wVk = 0
         x.ui.ki.wScan = scan_code
         x.ui.ki.dwFlags = flags
+        return x
+
+    def send_key_action(self, hexKeyCode, is_down=True, extended=False):
+        """Envoie l'événement key-down ou key-up de manière séparée."""
+        self._prepare_context()  # Prépare le focus
+        x = self._get_key_input(hexKeyCode, extended)
+
+        if not is_down:
+            x.ui.ki.dwFlags |= KEYEVENTF_KEYUP  # Ajoute le flag Key Up
+
         self._send_input(x)
 
-        # 3. Maintien
+    def press_key(self, hexKeyCode, duration=0.05, extended=False):
+        """
+        Ancienne fonction press_key (Down + Sleep + Up) - Conserve sa logique initiale.
+        """
+        self.send_key_action(hexKeyCode, is_down=True, extended=extended)
         time.sleep(duration)
+        self.send_key_action(hexKeyCode, is_down=False, extended=extended)
 
-        # 4. Relâchement (Up)
-        x.ui.ki.dwFlags = flags | KEYEVENTF_KEYUP
-        self._send_input(x)
+    # def press_key(self, hexKeyCode, duration=0.05, extended=False):
+    #     """
+    #     Appuie sur une touche (Mode Gamer : ScanCode)
+    #     """
+    #     self._prepare_context()
+    #
+    #     # 1. Conversion Virtual Key -> Scan Code
+    #     scan_code = self.user32.MapVirtualKeyW(hexKeyCode, 0)
+    #
+    #     # Gestion des touches étendues (Flèches, Suppr, etc.)
+    #     flags = KEYEVENTF_SCANCODE
+    #     if extended:
+    #         flags |= KEYEVENTF_EXTENDEDKEY
+    #
+    #     # 2. Appui (Down)
+    #     x = INPUT()
+    #     x.type = INPUT_KEYBOARD
+    #     x.ui.ki.wVk = 0
+    #     x.ui.ki.wScan = scan_code
+    #     x.ui.ki.dwFlags = flags
+    #     self._send_input(x)
+    #
+    #     # 3. Maintien
+    #     time.sleep(duration)
+    #
+    #     # 4. Relâchement (Up)
+    #     x.ui.ki.dwFlags = flags | KEYEVENTF_KEYUP
+    #     self._send_input(x)
 
     # --- MÉTHODES APPELABLES ---
 

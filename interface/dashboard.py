@@ -14,16 +14,11 @@ from scripts.system_features import SystemScripts
 from scripts.keyboard_features import KeyboardScripts
 from scripts.window_features import WindowScripts
 from scripts.parser_features import ParserScripts
-# Nouveaux Modules
 from scripts.network_features import NetworkFeatures
 from scripts.session_features import SessionFeatures
-
-# Import des composants UI locaux
-from .html_engine import RichTextDisplay
-from .controls import RoundedButton
+from scripts.ocr_features import OcrScripts
 
 # --- IMPORT DES PANNEAUX ---
-from .panels.header import HeaderPanel
 from .panels.sidebar import SidebarPanel
 from .panels.guide_view import GuidePanel
 from .panels.logger import LoggerPanel
@@ -65,6 +60,7 @@ class AppLauncher:
         self.parser = ParserScripts(self.log_message)
         self.network = NetworkFeatures(self.log_message)
         self.session = SessionFeatures(self.log_message, self.parser)
+        self.ocr = OcrScripts(self.log_message)
 
         # NOUVELLE VARIABLE DE MÉMOIRE POUR LA MACRO
         self.next_travel_command = None
