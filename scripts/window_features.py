@@ -1,5 +1,10 @@
 import ctypes
 import time
+# --- NOUVEAUX IMPORTS ---
+import win32gui
+import win32ui
+import win32con
+from PIL import Image
 
 
 class WindowScripts:
@@ -53,6 +58,69 @@ class WindowScripts:
         self.bound_handle = None
         self.bound_title = ""
         return False
+
+    def get_window_rect(self):
+        """Retourne les coordonnées (left, top, right, bottom) de la fenêtre liée"""
+        if not self.bound_handle:
+            self.log("Erreur : Aucune fenêtre n'est liée pour obtenir la zone.")
+            return None
+        try:
+            rect = win32gui.GetWindowRect(self.bound_handle)
+            # win32gui.GetWindowRect retourne (left, top, right, bottom)
+            return rect
+        except Exception as e:
+            self.log(f"Erreur lors de la récupération des coordonnées : {e}")
+            return None
+
+    def capture_window(self):
+        """
+        Capture l'image de la fenêtre liée et la retourne au format PIL.
+        """
+        if not self.bound_handle:
+            self.log("Erreur : Aucune fenêtre n'est liée pour la capture.")
+            return None
+
+        hwnd = self.bound_handle
+        left, top, right, bottom = self.get_window_rect()
+        w = right - left
+        h = bottom - top
+
+        hwndDC = win32gui.GetWindowDC(hwnd)
+        mfcDC = win32ui.CreateDCFromHandle(hwndDC)
+        saveDC = mfcDC.CreateCompatibleDC()
+
+        saveBitMap = win32ui.CreateBitmap()
+        saveBitMap.CreateCompatibleBitmap(mfcDC, w, h)
+
+        saveDC.SelectObject(saveBitMap)
+
+        # Copie le contenu de la fenêtre dans le bitmap (Utilise BDRCOPY pour exclure les bords)
+        result = ctypes.windll.user32.PrintWindow(hwnd, saveDC.GetSafeHdc(), 3)  # 3 = PW_CLIENT (Client area only)
+
+        if result != 1:
+            self.log("Erreur de PrintWindow, tentative de GetWindowDC/BitBlt...")
+            # Tentative de BitBlt si PrintWindow échoue
+            saveDC.BitBlt((0, 0), (w, h), mfcDC, (0, 0), win32con.SRCCOPY)
+
+        bmpinfo = saveBitMap.GetInfo()
+        bmpstr = saveBitMap.GetBitmapBits(True)
+
+        im = Image.frombuffer(
+            'RGB',
+            (bmpinfo['bmWidth'], bmpinfo['bmHeight']),
+            bmpstr, 'raw', 'BGRX', 0, 1)
+
+        # Nettoyage
+        win32gui.DeleteObject(saveBitMap.GetHandle())
+        saveDC.DeleteDC()
+        mfcDC.DeleteDC()
+        win32gui.ReleaseDC(hwnd, hwndDC)
+
+        if w > 0 and h > 0:
+            return im
+        else:
+            self.log("Erreur : La fenêtre n'est pas affichée (taille 0).")
+            return None
 
     def ensure_focus(self):
         """Vérifie si la fenêtre liée est active, sinon l'active"""

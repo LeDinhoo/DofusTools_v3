@@ -36,6 +36,24 @@ class SidebarPanel(tk.Frame):
             btn.pack(side="left", padx=1, expand=True, fill="x")
 
         self.section_title("OUTILS")
+
+        # --- NOUVEAU CHAMP INPUT OCR ---
+        tk.Label(self, text="Cible OCR (Ex: 'Tofu')", fg="#e0e0e0", bg="#121212", font=("Segoe UI", 9)).pack(
+            pady=(5, 0), anchor="w")
+        self.ocr_target_entry = tk.Entry(self, bg="#2b2b2b", fg="white", insertbackground="white", relief="flat")
+        self.ocr_target_entry.pack(fill="x", pady=2, ipady=3)
+        self.ocr_target_entry.insert(0, "Lester")  # Valeur par défaut
+        # -------------------------------
+
+        # Mise à jour de la commande OCR pour utiliser la valeur du champ
+        # La lambda doit lire le contenu de l'entrée au moment du clic.
+        ocr_command = lambda: self.controller.ocr.run_ocr_for_key_Z(
+            self.controller.window,
+            self.controller.keyboard,
+            target=self.ocr_target_entry.get()  # Passage de la valeur lue
+        )
+        self.add_btn("🔎 OCR (Touche Z + Fenêtre)", ocr_command)
+
         self.add_btn("📂 Charger JSON", self.controller.action_charger_json)
         self.add_btn("📜 Lister fenêtres", self.controller.window.demo_lister_tout)
 
