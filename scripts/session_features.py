@@ -5,19 +5,41 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class SessionFeatures:
     def __init__(self, parser_script, saves_dir="saves"):
-        # self.log supprimé, utilisation de 'logger' global au module
         self.parser = parser_script
         self.saves_dir = saves_dir
         self.session_file = os.path.join(saves_dir, "session.json")
         self.open_guides = []
         self.active_index = -1
+        # Caches
+        self.last_char_name = ""
+        self.last_ocr_zone = None  # (x, y, w, h)
+
+    # --- GESTION PREFERENCES ---
+
+    def save_last_character(self, char_name):
+        self.last_char_name = char_name
+        self.save_session_to_disk()
+
+    def get_last_character(self):
+        return self.last_char_name
+
+    def save_ocr_zone(self, zone_rect):
+        """Sauvegarde la zone OCR définie (x, y, w, h)"""
+        self.last_ocr_zone = zone_rect
+        self.save_session_to_disk()
+
+    def get_last_ocr_zone(self):
+        return self.last_ocr_zone
+
+    # --- GESTION LISTE GUIDES ---
 
     def add_guide(self, name, steps, filename="", guide_id=None):
         for i, guide in enumerate(self.open_guides):
             if (guide_id and str(guide.get('id')) == str(guide_id)) or \
-               (not guide_id and guide['name'] == name):
+                    (not guide_id and guide['name'] == name):
                 logger.info(f"Guide existant, focus onglet {i + 1}.")
                 self.active_index = i
                 self.save_session_to_disk()
@@ -59,6 +81,7 @@ class SessionFeatures:
             self.save_session_to_disk()
 
     # --- IO ---
+
     def _get_progression_path(self, identifier):
         if str(identifier).isdigit():
             return os.path.join(self.saves_dir, f"{identifier}.json")
@@ -88,6 +111,8 @@ class SessionFeatures:
 
     def save_session_to_disk(self):
         session_data = {
+            "character_name": self.last_char_name,
+            "ocr_zone": self.last_ocr_zone,  # Sauvegarde de la zone
             "active_tab": self.active_index,
             "open_guides": [{"file_path": g['file'], "id": g['id'], "name": g['name']} for g in self.open_guides]
         }
@@ -96,4 +121,14 @@ class SessionFeatures:
     def load_last_session(self):
         data = self.parser.load_file(self.session_file)
         if not data: return None, -1
+
+        self.last_char_name = data.get("character_name", "")
+
+        # Chargement sécurisé de la zone (doit être une liste/tuple de 4 éléments)
+        zone = data.get("ocr_zone")
+        if zone and isinstance(zone, list) and len(zone) == 4:
+            self.last_ocr_zone = tuple(zone)
+        else:
+            self.last_ocr_zone = None
+
         return data.get("open_guides", []), data.get("active_tab", -1)
