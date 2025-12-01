@@ -1,83 +1,141 @@
-import customtkinter as ctk
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QLineEdit,
+                             QPushButton, QHBoxLayout, QFrame, QCheckBox)
+from PyQt6.QtCore import Qt
 
 
-class SidebarPanel(ctk.CTkFrame):
-    def __init__(self, parent, controller):
-        super().__init__(parent, width=220, corner_radius=0)
+class SidebarPanel(QWidget):
+    def __init__(self, controller):
+        super().__init__()
         self.controller = controller
+        self.setFixedWidth(240)
+        self.setStyleSheet("background-color: #1e1e2e;")
 
-        # Empêcher la sidebar de rétrécir
-        self.grid_propagate(False)
+        self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(10, 20, 10, 20)
+        self.layout.setSpacing(10)
 
         self.setup_widgets()
+        self.layout.addStretch()  # Pousse tout vers le haut
 
     def setup_widgets(self):
         # TITRE
-        title = ctk.CTkLabel(self, text="DASHBOARD", font=ctk.CTkFont(size=20, weight="bold"))
-        title.pack(pady=(20, 10))
+        title = QLabel("DASHBOARD")
+        title.setStyleSheet("font-size: 18px; font-weight: bold; color: white;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(title)
+        self.layout.addSpacing(10)
 
         # --- CIBLAGE ---
         self.add_section("CIBLAGE")
 
-        bind_frame = ctk.CTkFrame(self, fg_color="transparent")
-        bind_frame.pack(fill="x", padx=10, pady=5)
+        bind_layout = QHBoxLayout()
+        self.bind_entry = QLineEdit()
+        self.bind_entry.setPlaceholderText("Nom du perso")
+        self.bind_entry.setStyleSheet(self._input_style())
 
-        self.bind_entry = ctk.CTkEntry(bind_frame, placeholder_text="Nom du perso")
-        self.bind_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        btn_link = self._create_icon_btn("🔗", self.controller.action_bind_window_wrapper)
 
-        btn_link = ctk.CTkButton(bind_frame, text="🔗", width=40, command=self.controller.action_bind_window_wrapper)
-        btn_link.pack(side="right")
+        bind_layout.addWidget(self.bind_entry)
+        bind_layout.addWidget(btn_link)
+        self.layout.addLayout(bind_layout)
 
-        macro_btn = ctk.CTkButton(self, text="⚔️ Macro Dofus", fg_color="transparent", border_width=1,
-                                  command=self.controller.action_macro_space_wrapper)
-        macro_btn.pack(fill="x", padx=10, pady=5)
+        macro_btn = self._create_btn("⚔️ Macro Dofus", self.controller.action_macro_space_wrapper)
+        self.layout.addWidget(macro_btn)
 
         # --- ACTIONS ---
         self.add_section("ACTIONS")
-        self.add_btn("🖱️ Clic Centre", self.controller.action_click_center_wrapper)
-        self.add_btn("🔴 Test Overlay", self.controller.action_test_overlay_wrapper)
+        self.layout.addWidget(self._create_btn("🖱️ Clic Centre", self.controller.action_click_center_wrapper))
+        self.layout.addWidget(self._create_btn("🔴 Test Overlay", self.controller.action_test_overlay_wrapper))
 
         # --- OUTILS ---
         self.add_section("OUTILS & OCR")
 
-        ocr_frame = ctk.CTkFrame(self, fg_color="transparent")
-        ocr_frame.pack(fill="x", padx=10, pady=5)
+        ocr_layout = QHBoxLayout()
+        self.ocr_target_entry = QLineEdit("Lester")
+        self.ocr_target_entry.setStyleSheet(self._input_style())
 
-        self.ocr_target_entry = ctk.CTkEntry(ocr_frame, placeholder_text="Cible")
-        self.ocr_target_entry.insert(0, "Lester")
-        self.ocr_target_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self.ocr_threshold_entry = QLineEdit("190")
+        self.ocr_threshold_entry.setFixedWidth(50)
+        self.ocr_threshold_entry.setStyleSheet(self._input_style())
 
-        self.ocr_threshold_entry = ctk.CTkEntry(ocr_frame, width=50, placeholder_text="190")
-        self.ocr_threshold_entry.insert(0, "190")
-        self.ocr_threshold_entry.pack(side="right")
+        ocr_layout.addWidget(self.ocr_target_entry)
+        ocr_layout.addWidget(self.ocr_threshold_entry)
+        self.layout.addLayout(ocr_layout)
 
-        self.var_grayscale = ctk.BooleanVar(value=True)
-        cb_gray = ctk.CTkCheckBox(self, text="Noir & Blanc", variable=self.var_grayscale)
-        cb_gray.pack(padx=10, pady=5, anchor="w")
+        self.chk_grayscale = QCheckBox("Noir & Blanc")
+        self.chk_grayscale.setChecked(True)
+        self.chk_grayscale.setStyleSheet("color: white;")
+        self.layout.addWidget(self.chk_grayscale)
 
-        tools_frame = ctk.CTkFrame(self, fg_color="transparent")
-        tools_frame.pack(fill="x", padx=10, pady=5)
+        tools_layout = QHBoxLayout()
+        btn_zone = self._create_btn("📐 Zone", self.controller.action_define_ocr_zone_wrapper)
+        btn_zone.setStyleSheet(btn_zone.styleSheet().replace("#252535", "#E59937").replace("#3a3a4a", "#D48826"))
 
-        ctk.CTkButton(tools_frame, text="📐 Zone", width=80, fg_color="#E59937", hover_color="#D48826",
-                      command=self.controller.action_define_ocr_zone_wrapper).pack(side="left", padx=(0, 5))
+        btn_search = self._create_btn("🔎 Chercher", self.controller.action_ocr_wrapper)
 
-        ctk.CTkButton(tools_frame, text="🔎 Chercher", width=80,
-                      command=self.controller.action_ocr_wrapper).pack(side="right")
+        tools_layout.addWidget(btn_zone)
+        tools_layout.addWidget(btn_search)
+        self.layout.addLayout(tools_layout)
 
-        # --- CHARGEMENT ---
-        ctk.CTkButton(self, text="📂 Charger JSON", fg_color="transparent", border_width=1,
-                      text_color=("gray10", "gray90"),
-                      command=self.controller.action_load_json_wrapper).pack(fill="x", padx=10, pady=(20, 10),
-                                                                             side="bottom")
+        # --- BAS ---
+        self.layout.addStretch()
+        self.layout.addWidget(self._create_btn("📂 Charger JSON", self.controller.action_load_json_wrapper))
 
     def add_section(self, text):
-        lbl = ctk.CTkLabel(self, text=text, text_color="gray", font=ctk.CTkFont(size=11, weight="bold"))
-        lbl.pack(pady=(15, 0), padx=10, anchor="w")
+        lbl = QLabel(text)
+        lbl.setStyleSheet("color: #888888; font-weight: bold; font-size: 11px; margin-top: 15px;")
+        self.layout.addWidget(lbl)
 
-    def add_btn(self, text, cmd):
-        btn = ctk.CTkButton(self, text=text, fg_color="transparent", border_width=1, command=cmd)
-        btn.pack(fill="x", padx=10, pady=2)
+    def _create_btn(self, text, command):
+        btn = QPushButton(text)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(command)
+        btn.setFixedHeight(32)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #252535;
+                border-radius: 6px;
+                color: white;
+                border: 1px solid #3a3a4a;
+            }
+            QPushButton:hover {
+                background-color: #3a3a4a;
+            }
+        """)
+        return btn
+
+    def _create_icon_btn(self, text, command):
+        btn = QPushButton(text)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(command)
+        btn.setFixedSize(32, 32)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #252535;
+                border-radius: 6px;
+                color: white;
+            }
+            QPushButton:hover { background-color: #3a3a4a; }
+        """)
+        return btn
+
+    def _input_style(self):
+        return """
+            QLineEdit {
+                background-color: #121212;
+                border: 1px solid #3a3a4a;
+                border-radius: 4px;
+                padding: 4px;
+                color: white;
+            }
+            QLineEdit:focus { border: 1px solid #4da6ff; }
+        """
+
+    # Helpers pour le controller
+    def get_bind_entry_text(self): return self.bind_entry.text()
+
+    def set_bind_entry_text(self, text): self.bind_entry.setText(text)
 
     def update_bind_status(self, status):
-        color = "green" if status == "success" else "red" if status == "error" else "gray"
-        self.bind_entry.configure(border_color=color)
+        color = "#00ff00" if status == "success" else "#ff0000" if status == "error" else "#3a3a4a"
+        self.bind_entry.setStyleSheet(self._input_style().replace("#3a3a4a", color))

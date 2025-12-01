@@ -1,92 +1,77 @@
-import tkinter as tk
 import logging
+from PyQt6.QtWidgets import QWidget, QApplication
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QPainter, QColor, QPen
 
 logger = logging.getLogger(__name__)
 
 
-class OverlayScripts:
-    def __init__(self, root):
-        self.root = root
-        self.active_overlays = []
+class OverlayDot(QWidget):
+    def __init__(self, x, y, size, color, duration):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # Clic à travers
 
-    def _create_overlay_window(self, x, y, width, height, duration=0):
-        """
-        Crée une base de fenêtre transparente et 'click-through' (les clics passent au travers).
-        """
-        top = tk.Toplevel(self.root)
-        top.overrideredirect(True)  # Pas de bordure
-        top.wm_attributes("-topmost", True)  # Toujours au dessus
-        top.wm_attributes("-disabled", True)  # IGNORER les clics souris (Windows)
-        top.wm_attributes("-transparentcolor", "black")  # Le noir devient 100% transparent
-        top.config(bg="black")
+        self.setGeometry(x - size // 2, y - size // 2, size, size)
+        self.color = QColor(color)
+        self.size_px = size
 
-        # Positionnement
-        top.geometry(f"{width}x{height}+{int(x)}+{int(y)}")
-
-        # Auto-destruction
+        self.show()
         if duration > 0:
-            self.root.after(duration, top.destroy)
+            QTimer.singleShot(duration, self.close)
 
-        # Nettoyage de la liste
-        def on_destroy(event):
-            if top in self.active_overlays:
-                self.active_overlays.remove(top)
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(self.color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(0, 0, self.size_px, self.size_px)
 
-        top.bind("<Destroy>", on_destroy)
 
-        self.active_overlays.append(top)
-        return top
+class OverlayZone(QWidget):
+    def __init__(self, x, y, w, h, color, alpha, duration):
+        super().__init__()
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        self.setGeometry(x, y, w, h)
+        col = QColor(color)
+        col.setAlphaF(alpha)
+        self.color = col
+
+        self.show()
+        if duration > 0:
+            QTimer.singleShot(duration, self.close)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.color)
+        pen = QPen(self.color)
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawRect(0, 0, self.width() - 1, self.height() - 1)
+
+
+class OverlayScripts:
+    def __init__(self):
+        self.overlays = []
 
     def draw_dot(self, x, y, color="#00ff00", size=10, duration=2000):
-        """
-        Dessine un point (cercle) à l'écran aux coordonnées absolues X,Y.
-        Thread-safe : Peut être appelé depuis n'importe quel thread.
-        """
-        logger.info(f"Overlay: Point {color} à ({x}, {y})")
-
-        def _gui_task():
-            # Centrer le point sur X, Y
-            win_x = x - size // 2
-            win_y = y - size // 2
-
-            top = self._create_overlay_window(win_x, win_y, size, size, duration)
-
-            # Canvas transparent
-            canvas = tk.Canvas(top, bg="black", highlightthickness=0)
-            canvas.pack(fill="both", expand=True)
-
-            # Dessin du cercle
-            canvas.create_oval(0, 0, size, size, fill=color, outline=color)
-
-        # Exécution sur le thread principal (obligatoire pour GUI)
-        self.root.after(0, _gui_task)
+        # Doit être appelé depuis le thread principal via QTimer/Signal si hors thread
+        # Mais le controller gère ça via _run_on_main_thread
+        ov = OverlayDot(x, y, size, color, duration)
+        self.overlays.append(ov)
+        # Nettoyage auto de la liste
+        QTimer.singleShot(duration + 100, lambda: self.overlays.remove(ov) if ov in self.overlays else None)
 
     def draw_zone(self, x, y, w, h, color="red", alpha=0.3, duration=2000):
-        """
-        Dessine une zone rectangulaire semi-transparente (ex: pour debugger une zone OCR).
-        """
-        logger.info(f"Overlay: Zone {w}x{h} à ({x}, {y})")
-
-        def _gui_task():
-            top = tk.Toplevel(self.root)
-            top.overrideredirect(True)
-            top.wm_attributes("-topmost", True)
-            top.wm_attributes("-disabled", True)
-            top.wm_attributes("-alpha", alpha)  # Transparence globale (0.0 à 1.0)
-            top.config(bg=color)
-            top.geometry(f"{w}x{h}+{int(x)}+{int(y)}")
-
-            if duration > 0:
-                self.root.after(duration, top.destroy)
-            self.active_overlays.append(top)
-
-        self.root.after(0, _gui_task)
+        ov = OverlayZone(x, y, w, h, color, alpha, duration)
+        self.overlays.append(ov)
+        QTimer.singleShot(duration + 100, lambda: self.overlays.remove(ov) if ov in self.overlays else None)
 
     def clear_all(self):
-        """Nettoie tous les overlays actifs immédiatement"""
-        for top in self.active_overlays:
-            try:
-                top.destroy()
-            except:
-                pass
-        self.active_overlays.clear()
+        for ov in self.overlays:
+            ov.close()
+        self.overlays.clear()

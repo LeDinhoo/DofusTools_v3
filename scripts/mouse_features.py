@@ -21,3 +21,10 @@ class MouseScripts:
         self.user32.SetCursorPos(960, 540)
         self.user32.mouse_event(0x02, 0, 0, 0, 0) # Down
         self.user32.mouse_event(0x04, 0, 0, 0, 0) # Up
+
+    def click_at(self, x, y):
+        """Déplace la souris aux coordonnées (x,y) et fait un clic gauche"""
+        logger.info(f"Souris : Clic à ({x}, {y})")
+        self.user32.SetCursorPos(int(x), int(y))
+        self.user32.mouse_event(0x02, 0, 0, 0, 0)  # Mouse Down (Clic gauche)
+        self.user32.mouse_event(0x04, 0, 0, 0, 0)  # Mouse Up
