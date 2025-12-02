@@ -18,8 +18,8 @@ class AppLauncher(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        self.setWindowTitle("Python Automation Hub (PyQt6)")
-        self.resize(1200, 850)
+        self.setWindowTitle(" ")
+        self.resize(800, 850)
 
         # Toujours au dessus
         self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)

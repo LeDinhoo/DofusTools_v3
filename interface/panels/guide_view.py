@@ -4,7 +4,9 @@ import urllib.request
 import threading
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebChannel import QWebChannel
-from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, QLineEdit, QScrollArea)
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QPushButton, QLineEdit, QScrollArea,
+                             QSizePolicy, QMenu)
+from PyQt6.QtGui import QAction
 from PyQt6.QtCore import Qt, QUrl, pyqtSignal
 
 # Imports des modules découpés
@@ -21,9 +23,14 @@ class GuidePanel(QWidget):
     def __init__(self, controller):
         super().__init__()
         self.controller = controller
-        self.setStyleSheet("background-color: #1e1e2e;")
+        # Fond global harmonisé
+        self.setStyleSheet("background-color: #1a1a1a;")
+
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
+
+        # Supprime l'espace par défaut (souvent ~6px) entre les widgets empilés
+        self.layout.setSpacing(0)
 
         self.config = DEFAULT_CONFIG.copy()
         self.assets_dir = os.path.join(os.getcwd(), "assets").replace("\\", "/")
@@ -36,6 +43,10 @@ class GuidePanel(QWidget):
         self.current_step_id = None
         self.checkbox_states = {}
 
+        # Stockage local des guides pour le redimensionnement
+        self.cached_guides = []
+        self.cached_active_idx = -1
+
         self.setup_ui()
 
         # Setup WebEngine & Bridge
@@ -46,23 +57,53 @@ class GuidePanel(QWidget):
         self.image_loaded.connect(self._refresh_display_content)
 
     def setup_ui(self):
-        # 1. Onglets
-        self.tabs_scroll = QScrollArea()
-        self.tabs_scroll.setFixedHeight(40)
-        self.tabs_scroll.setWidgetResizable(True)
-        self.tabs_scroll.setStyleSheet("background-color: #121212; border: none;")
-        self.tabs_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tabs_container = QWidget()
-        self.tabs_layout = QHBoxLayout(self.tabs_container)
-        self.tabs_layout.setContentsMargins(5, 0, 5, 0)
-        self.tabs_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.tabs_scroll.setWidget(self.tabs_container)
-        self.layout.addWidget(self.tabs_scroll)
+        # 1. Zone des Onglets (Conteneur principal)
+        self.tabs_main_widget = QWidget()
+        self.tabs_main_widget.setFixedHeight(40)
+        self.tabs_main_widget.setStyleSheet("background-color: #121212;")
 
-        # 2. Header
+        # Layout horizontal pour la zone des onglets
+        self.tabs_header_layout = QHBoxLayout(self.tabs_main_widget)
+        self.tabs_header_layout.setContentsMargins(5, 10, 5, 0)
+        self.tabs_header_layout.setSpacing(5)
+
+        # -- Bouton Burger (Caché par défaut) --
+        self.btn_burger = QPushButton("☰")
+        self.btn_burger.setFixedSize(30, 30)
+        self.btn_burger.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_burger.setStyleSheet("""
+            QPushButton { 
+                background-color: #2d2d2d; 
+                color: #888; 
+                border: none; 
+                border-radius: 4px;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #3a3a3a; color: white; }
+        """)
+        self.btn_burger.hide()  # On le cache au début
+        self.btn_burger.clicked.connect(self._show_guides_menu)
+        self.tabs_header_layout.addWidget(self.btn_burger)
+
+        # -- Conteneur des onglets (Tabs) --
+        self.tabs_container = QWidget()
+        # IMPORTANT : On permet au conteneur de rétrécir autant que nécessaire
+        self.tabs_container.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+        self.tabs_layout = QHBoxLayout(self.tabs_container)
+        self.tabs_layout.setContentsMargins(0, 0, 0, 0)
+        self.tabs_layout.setSpacing(1)
+
+        # Le conteneur d'onglets prend tout l'espace restant
+        self.tabs_header_layout.addWidget(self.tabs_container)
+
+        self.layout.addWidget(self.tabs_main_widget)
+
+        # 2. Header (Barre de navigation)
         nav_bar = QFrame()
         nav_bar.setFixedHeight(50)
-        nav_bar.setStyleSheet("background-color: #252535;")
+        nav_bar.setStyleSheet("background-color: #1a1a1a;")
         nav_layout = QHBoxLayout(nav_bar)
 
         self.lbl_position = QLabel("")
@@ -116,6 +157,112 @@ class GuidePanel(QWidget):
         c = "#00ff00" if self.btn_auto.isChecked() else "#666"
         self.btn_auto.setStyleSheet(f"QPushButton {{ background: #333344; border-radius: 8px; color: {c}; }}")
 
+    # --- MENU BURGER ---
+    def _show_guides_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background-color: #252535; color: white; border: 1px solid #4da6ff; }
+            QMenu::item { padding: 5px 20px; }
+            QMenu::item:selected { background-color: #4da6ff; color: white; }
+        """)
+
+        for i, guide in enumerate(self.cached_guides):
+            name = guide['name']
+            action = QAction(name, self)
+            # Marquer l'action si c'est le guide actif
+            if i == self.cached_active_idx:
+                font = action.font()
+                font.setBold(True)
+                action.setFont(font)
+                action.setText(f"➤ {name}")
+
+            action.triggered.connect(lambda _, x=i: self.controller.switch_tab(x))
+            menu.addAction(action)
+
+        menu.exec(self.btn_burger.mapToGlobal(self.btn_burger.rect().bottomLeft()))
+
+    # --- GESTION REDIMENSIONNEMENT ---
+    def resizeEvent(self, event):
+        # Recalcule l'affichage des onglets lors du redimensionnement
+        if self.cached_guides:
+            self._render_tabs_logic()
+        super().resizeEvent(event)
+
+    def _render_tabs_logic(self):
+        """
+        Logique intelligente :
+        1. Estime la largeur nécessaire pour afficher TOUS les onglets.
+        2. Si ça rentre -> Affiche tous les onglets, cache le burger.
+        3. Si ça ne rentre pas -> Affiche Burger + Onglet Actif (qui prend toute la place).
+        """
+        if not self.cached_guides: return
+
+        # Largeur disponible pour les onglets (largeur totale de la fenêtre - marges)
+        available_width = self.tabs_main_widget.width() - 20
+
+        # Estimation largeur requise (min 150px par onglet pour être lisible + espacement)
+        min_width_per_tab = 150
+        required_width = len(self.cached_guides) * min_width_per_tab
+
+        # Si la largeur requise est plus grande que la largeur dispo, on passe en mode burger
+        should_collapse = required_width > available_width
+
+        # Nettoyage layout
+        while self.tabs_layout.count():
+            item = self.tabs_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+
+        if should_collapse:
+            # MODE COMPACT : Burger + 1 Onglet (Actif)
+            self.btn_burger.show()
+
+            # On affiche uniquement l'onglet actif
+            if 0 <= self.cached_active_idx < len(self.cached_guides):
+                self._add_tab_widget(self.cached_guides[self.cached_active_idx], self.cached_active_idx, is_active=True,
+                                     allow_close=True)
+            else:
+                pass
+        else:
+            # MODE NORMAL : Tous les onglets
+            self.btn_burger.hide()
+            for i, guide in enumerate(self.cached_guides):
+                is_active = (i == self.cached_active_idx)
+                self._add_tab_widget(guide, i, is_active=is_active, allow_close=True)
+
+    def _add_tab_widget(self, guide, index, is_active, allow_close):
+        bg, fg, fw = ("#1a1a1a", "#4da6ff", "bold") if is_active else ("#2d2d2d", "#888", "normal")
+
+        tab = QFrame()
+        # Expanding permet à l'onglet de prendre toute la place dispo en mode burger
+        tab.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        tab.setStyleSheet(
+            f"QFrame {{ background-color: {bg}; border-top-left-radius: 6px; border-top-right-radius: 6px; }}")
+
+        l = QHBoxLayout(tab)
+        l.setContentsMargins(10, 2, 5, 2)
+        l.setSpacing(5)
+
+        name_text = (guide['name'][:25] + "...") if len(guide['name']) > 28 else guide['name']
+        btn = QPushButton(name_text)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        btn.setStyleSheet(
+            f"text-align: left; border: none; background: transparent; color: {fg}; font-weight: {fw}; font-size: 13px;")
+        btn.clicked.connect(lambda _, x=index: self.controller.switch_tab(x))
+
+        l.addWidget(btn)
+
+        if allow_close:
+            close = QPushButton("✕")
+            close.setFixedSize(20, 20)
+            close.setCursor(Qt.CursorShape.PointingHandCursor)
+            close.setStyleSheet(
+                "QPushButton { color: #666; border: none; background: transparent; font-weight: bold; } QPushButton:hover { color: #ff5555; background-color: #3a1a1a; border-radius: 10px; }")
+            close.clicked.connect(lambda _, x=index: self.controller.close_tab(x))
+            l.addWidget(close)
+
+        self.tabs_layout.addWidget(tab)
+
     # --- IMAGE CACHING ---
     def _get_cached_image_path(self, url):
         ext = ".jpg" if ".jpg" in url.lower() or ".jpeg" in url.lower() else ".png"
@@ -141,32 +288,15 @@ class GuidePanel(QWidget):
     def _refresh_display_content(self):
         if self.current_html_content:
             final = generate_full_html(self.current_html_content, self.config)
-            # CORRECTION ICI : "file:///" au lieu de "qrc:///"
             self.browser.setHtml(final, QUrl("file:///"))
 
     def update_tabs(self, guides, active_idx):
-        while self.tabs_layout.count(): item = self.tabs_layout.takeAt(0); item.widget().deleteLater()
-        for i, guide in enumerate(guides):
-            is_active = (i == active_idx)
-            bg, fg, fw = ("#1e1e2e", "#fff", "bold") if is_active else ("#2d2d2d", "#888", "normal")
-
-            tab = QFrame()
-            tab.setStyleSheet(f"background: {bg}; border-radius: 4px;")
-            l = QHBoxLayout(tab);
-            l.setContentsMargins(8, 2, 8, 2)
-
-            btn = QPushButton((guide['name'][:17] + "...") if len(guide['name']) > 20 else guide['name'])
-            btn.setStyleSheet(f"border:none; background:transparent; color:{fg}; font-weight:{fw};")
-            btn.clicked.connect(lambda _, x=i: self.controller.switch_tab(x))
-
-            close = QPushButton("✕")
-            close.setFixedSize(16, 16)
-            close.setStyleSheet("color:#ff5555; border:none; font-weight:bold;")
-            close.clicked.connect(lambda _, x=i: self.controller.close_tab(x))
-
-            l.addWidget(btn);
-            l.addWidget(close)
-            self.tabs_layout.addWidget(tab)
+        """
+        Met à jour la liste locale et déclenche le rendu intelligent.
+        """
+        self.cached_guides = guides
+        self.cached_active_idx = active_idx
+        self._render_tabs_logic()
 
     def update_content(self, guide_data, parser):
         if not guide_data:
@@ -186,7 +316,6 @@ class GuidePanel(QWidget):
         c = parser.get_step_coords(step)
         self.lbl_position.setText(f"[{c[0]}, {c[1]}]" if c else "")
 
-        # Utilisation du Processor externe
         raw = parser.get_step_web_text(step)
         self.current_html_content = self.processor.preprocess_content(
             raw, self.current_guide_id, self.current_step_id,
