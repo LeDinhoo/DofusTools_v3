@@ -106,6 +106,9 @@ class GuidePanel(QWidget):
         nav_bar.setStyleSheet("background-color: #1a1a1a;")
         nav_layout = QHBoxLayout(nav_bar)
 
+        # MODIFICATION: Ajout de l'alignement vertical au centre
+        nav_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
         self.lbl_position = QLabel("")
         self.lbl_position.setStyleSheet("font-size: 14px; font-weight: bold; color: #ffd700; cursor: pointer;")
         self.lbl_position.mousePressEvent = lambda e: self.controller.copy_position()
@@ -115,13 +118,16 @@ class GuidePanel(QWidget):
         self.btn_prev = self._create_btn("◀", self.controller.nav_previous)
         self.entry_step = QLineEdit("--")
         self.entry_step.setFixedWidth(40)
-        self.entry_step.setStyleSheet("background: #1a1a1a; color: #4da6ff; border: none; font-weight: bold;")
+        # MODIFICATION: Ajout de font-size: 14px pour la cohérence
+        self.entry_step.setStyleSheet(
+            "background: #1a1a1a; color: #4da6ff; border: none; font-weight: bold; font-size: 14px;")
         self.entry_step.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.entry_step.returnPressed.connect(
             lambda: self.controller.on_guide_link_clicked(f"STEP:{self.entry_step.text()}"))
 
         self.lbl_total = QLabel("/ --")
-        self.lbl_total.setStyleSheet("color: #888;")
+        # MODIFICATION: Ajout de font-size: 14px pour la cohérence
+        self.lbl_total.setStyleSheet("color: #888; font-size: 14px;")
         self.btn_next = self._create_btn("▶", self.controller.nav_next)
 
         self.btn_auto = self._create_btn("✈", self._toggle_auto)
@@ -129,7 +135,13 @@ class GuidePanel(QWidget):
         self.btn_auto.setChecked(True)
         self.update_auto_btn_color()
 
-        for w in [self.btn_prev, self.entry_step, self.lbl_total, self.btn_next, self.btn_auto]:
+        # NOUVEAU BOUTON CLAVIER
+        self.btn_keyboard = self._create_btn("⌨️", self._toggle_keyboard)
+        self.btn_keyboard.setCheckable(True)
+        self.btn_keyboard.setChecked(True)
+        self.update_keyboard_btn_color()
+
+        for w in [self.btn_prev, self.entry_step, self.lbl_total, self.btn_next, self.btn_auto, self.btn_keyboard]:
             nav_layout.addWidget(w)
             if w == self.btn_next: nav_layout.addSpacing(10)
         self.layout.addWidget(nav_bar)
@@ -156,6 +168,15 @@ class GuidePanel(QWidget):
     def update_auto_btn_color(self):
         c = "#00ff00" if self.btn_auto.isChecked() else "#666"
         self.btn_auto.setStyleSheet(f"QPushButton {{ background: #333344; border-radius: 8px; color: {c}; }}")
+
+    # NOUVELLES METHODES POUR LE BOUTON CLAVIER
+    def _toggle_keyboard(self):
+        self.btn_keyboard.setChecked(self.controller.toggle_keyboard_nav())
+        self.update_keyboard_btn_color()
+
+    def update_keyboard_btn_color(self):
+        c = "#00ff00" if self.btn_keyboard.isChecked() else "#666"
+        self.btn_keyboard.setStyleSheet(f"QPushButton {{ background: #333344; border-radius: 8px; color: {c}; }}")
 
     # --- MENU BURGER ---
     def _show_guides_menu(self):

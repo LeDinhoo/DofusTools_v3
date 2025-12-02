@@ -81,10 +81,12 @@ class AppLauncher(QMainWindow):
         self.status_bar.setFixedHeight(45)
         self.status_bar.setStyleSheet("background-color: #1a1a1a;")
         sb_layout = QHBoxLayout(self.status_bar)
-        sb_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.btn_tools = self.create_status_btn("🛠️ Outils", self.toggle_sidebar, True)
-        self.btn_logs = self.create_status_btn("📝 Logs", self.toggle_logs, False)
+        sb_layout.setContentsMargins(10, 0, 10, 0)
+        sb_layout.addStretch(1)
+
+        self.btn_tools = self.create_status_btn("🛠️", self.toggle_sidebar, True)
+        self.btn_logs = self.create_status_btn("📝", self.toggle_logs, False)
 
         sb_layout.addWidget(self.btn_tools)
         sb_layout.addWidget(self.btn_logs)
@@ -102,7 +104,8 @@ class AppLauncher(QMainWindow):
 
     def create_status_btn(self, text, command, is_active):
         btn = QPushButton(text)
-        btn.setFixedSize(120, 30)
+        btn.setFixedHeight(30)
+        btn.setMinimumWidth(30)
         btn.clicked.connect(command)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_btn_style(btn, is_active)
@@ -118,6 +121,7 @@ class AppLauncher(QMainWindow):
                 border-radius: 5px;
                 font-weight: bold;
                 border: none;
+                font-size: 16px; 
             }}
             QPushButton:hover {{
                 background-color: #3a8ee6;
@@ -167,6 +171,10 @@ class AppLauncher(QMainWindow):
             # Vérification si focus sur un champ texte
             focus_widget = QApplication.focusWidget()
             if focus_widget and isinstance(focus_widget, QLineEdit):
+                return
+
+            # NOUVEAU : Vérification de l'état du bouton "Clavier"
+            if not self.controller.is_keyboard_nav_enabled:
                 return
 
             # Vérification Touches Globales

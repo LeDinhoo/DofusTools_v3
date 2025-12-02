@@ -42,6 +42,10 @@ class SidebarPanel(QWidget):
         macro_btn = self._create_btn("⚔️ Macro Dofus", self.controller.action_macro_space_wrapper)
         self.layout.addWidget(macro_btn)
 
+        # NOUVEAU BOUTON : Macro H + Clic
+        macro_h_click_btn = self._create_btn("✨ Macro H + Clic", self.controller.action_macro_h_click_wrapper)
+        self.layout.addWidget(macro_h_click_btn)
+
         # --- ACTIONS ---
         self.add_section("ACTIONS")
         self.layout.addWidget(self._create_btn("🖱️ Clic Centre", self.controller.action_click_center_wrapper))

@@ -10,8 +10,8 @@ class Bridge(QObject):
 
     @pyqtSlot(str)
     def handleLink(self, link):
-        # Redirige les liens GUIDE: et STEP: vers le contrôleur
-        if link.startswith("GUIDE:") or link.startswith("STEP:"):
+        # Redirige les liens GUIDE:, STEP: et TRAVEL: vers le contrôleur
+        if link.startswith("GUIDE:") or link.startswith("STEP:") or link.startswith("TRAVEL:"):
             self.controller.on_guide_link_clicked(link)
         elif link.startswith("CB:"):
             # Ici on pourrait sauvegarder l'état des checkboxes si nécessaire
