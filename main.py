@@ -1,8 +1,9 @@
 import sys
 import logging
 import traceback
+import os  # Ajout de os pour la gestion du chemin de l'icône
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont, QColor, QPalette
+from PyQt6.QtGui import QFont, QColor, QPalette, QIcon  # Ajout de QIcon
 from PyQt6.QtCore import Qt
 from interface.dashboard import AppLauncher
 
@@ -54,6 +55,16 @@ if __name__ == "__main__":
     sys.excepthook = exception_hook
 
     app = QApplication(sys.argv)
+
+    # NOUVEAU : Tentative de chargement de l'icône PNG
+    try:
+        # Cherche 'app_icon.png' à la racine du projet
+        app_icon_path = os.path.join(os.path.dirname(__file__), "app_icon.png")
+        if os.path.exists(app_icon_path):
+            app.setWindowIcon(QIcon(app_icon_path))
+    except Exception as e:
+        logger.error(f"Erreur lors du chargement de l'icône : {e}")
+
     apply_dracula_theme(app)
 
     window = AppLauncher()

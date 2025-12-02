@@ -1,4 +1,14 @@
 import os
+import sys
+
+
+def resource_path(relative_path):
+    """Obtient le chemin absolu de la ressource, fonctionne pour dev et PyInstaller."""
+    if hasattr(sys, '_MEIPASS'):
+        # Chemins dans l'exécutable PyInstaller
+        # L'ajout de données dans le .spec doit correspondre à cette structure.
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
 
 def generate_full_html(body_content, config):
@@ -6,12 +16,9 @@ def generate_full_html(body_content, config):
     Génère la page HTML en chargeant le CSS depuis un fichier externe.
     """
 
-    # Chemin vers le fichier CSS
-    # On suppose que le fichier est dans interface/assets/style.css par rapport à la racine du projet
-    # Il est plus robuste d'utiliser un chemin relatif basé sur l'emplacement de ce fichier
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    # On remonte d'un niveau (interface/panels -> interface) puis on va dans assets
-    css_path = os.path.join(current_dir, "assets", "style.css")
+    # Utilisation de resource_path pour la compatibilité PyInstaller
+    # Le chemin relatif est basé sur la racine du projet
+    css_path = resource_path(os.path.join("interface", "panels", "assets", "style.css"))
     css_content = ""
 
     if os.path.exists(css_path):
