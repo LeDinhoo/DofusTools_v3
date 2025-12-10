@@ -83,15 +83,11 @@ class MainController(QObject):
         logger.info(f"Déplacement automatique {status}")
         return self.is_auto_travel_enabled
 
-    def toggle_keyboard_nav(self):  # NOUVEAU
+    def toggle_keyboard_nav(self):
         self.is_keyboard_nav_enabled = not self.is_keyboard_nav_enabled
         status = "ACTIVÉ" if self.is_keyboard_nav_enabled else "DÉSACTIVÉ"
         logger.info(f"Navigation clavier (A/D) {status}")
         return self.is_keyboard_nav_enabled
-
-    # ... (Le reste du fichier reste inchangé : action_load_json_wrapper, etc.) ...
-    # ... Pour alléger la réponse, je ne remets pas tout le code déjà validé ...
-    # ... Assurez-vous de garder tout le reste du fichier controller.py identique ...
 
     def action_load_json_wrapper(self):
         try:
@@ -217,6 +213,81 @@ class MainController(QObject):
         except Exception as e:
             logger.error(f"❌ Erreur Macro H+Clic Zaap : {e}", exc_info=True)
 
+    def _macro_zaapi_task(self, zaapi_name, travel_cmd):
+        """
+        Macro spécifique pour les Zaapis :
+        1. Havre-Sac (H) -> Clic Zaap -> Écrit 'Bonta' -> Entrée (pour aller au hub Zaapi)
+        2. Clic sur l'onglet Zaapi (1914, 285)
+        3. Filtrage catégorie (Atelier/Hôtel/Divers)
+        4. Réactivation du champ de recherche (1008, 529)
+        5. Saisie du nom du Zaapi -> Entrée
+        6. Check 'Milice' pour skip travel
+        """
+        logger.info(f"⚔️ MACRO ZAAPI START: {zaapi_name}")
+        if not self.window.bound_handle:
+            logger.warning("⚠️ MACRO ABANDONNÉE : Aucune fenêtre liée.")
+            return
+        self.window.ensure_focus()
+        try:
+            # --- ÉTAPE 1 : Voyage vers Bonta (Hub Zaapi) ---
+            self.keyboard.press_key(0x48)  # Touche H
+            time.sleep(1.7)
+            self.mouse.click_at(719, 497)  # Clic sur le Zaap du Havre-Sac
+            time.sleep(0.3)
+
+            # On force la destination "Bonta" pour accéder aux Zaapis
+            logger.info("✍️ Saisie destination hub : Bonta")
+            self.keyboard.send_text("Bonta")
+            time.sleep(0.3)
+            self.keyboard.press_enter()
+
+            logger.info("⏳ Attente téléportation (2.5s)...")
+            time.sleep(2.5)  # Temps pour charger la map de Bonta
+
+            # --- ÉTAPE 2 : Interface Zaapi ---
+            logger.info(f"🖱️ Clic onglet Zaapi (1914, 285)")
+            self.mouse.click_at(1914, 285)  # Changement d'onglet vers Zaapi
+            time.sleep(1.8)
+
+            # --- ÉTAPE 3 : Filtrage par catégorie ---
+            if zaapi_name:
+                if "Atelier" in zaapi_name:
+                    logger.info("🖱️ Filtre : Atelier (1111, 468)")
+                    self.mouse.click_at(1111, 468)
+                elif "Hôtel" in zaapi_name:
+                    logger.info("🖱️ Filtre : Hôtel (1286, 468)")
+                    self.mouse.click_at(1286, 468)
+                else:
+                    logger.info("🖱️ Filtre : Divers (1456, 468)")
+                    self.mouse.click_at(1456, 468)
+                time.sleep(0.3)
+
+                # --- ÉTAPE 4 : Réactivation du champ de recherche ---
+                logger.info("🖱️ Clic Input Recherche (1008, 529)")
+                self.mouse.click_at(1008, 529)
+                time.sleep(0.2)
+
+                # --- ÉTAPE 5 : Saisie ---
+                logger.info(f"✍️ Saisie du Zaapi : {zaapi_name}")
+                self.keyboard.send_text(zaapi_name)
+                time.sleep(0.3)
+                self.keyboard.press_enter()
+
+            # --- ÉTAPE 6 : Travel final (si nécessaire) ---
+            if travel_cmd:
+                # Si la destination est "Milice", on ne fait pas le travel car le Zaapi est déjà sur la map
+                if zaapi_name and "Milice" in zaapi_name:
+                    logger.info("🛑 Destination 'Milice' détectée : Travel annulé (déjà sur place).")
+                else:
+                    logger.info("⏳ Attente 2.0s pour travel...")
+                    time.sleep(2.0)
+                    logger.info(f"🚀 Enchaînement Travel : {travel_cmd}")
+                    self._execute_travel_sequence(travel_cmd)
+
+            logger.info("✅ MACRO ZAAPI END")
+        except Exception as e:
+            logger.error(f"❌ Erreur Macro Zaapi : {e}", exc_info=True)
+
     def _execute_travel_sequence(self, cmd_string):
         logger.info(f"⌨️ Séquence chat : {cmd_string}")
         self.keyboard.press_space()
@@ -253,9 +324,21 @@ class MainController(QObject):
                     if travel_match:
                         x, y = travel_match.group(1), travel_match.group(2)
                         self.next_travel_command = f"/travel {x},{y}"
+
+                        # DÉTECTION : Zaapi vs Zaap
+                        # On cherche "Zaapi" spécifiquement en premier
+                        zaapi_regex = r'Zaapi.*?<span[^>]*style="color:\s*rgb\(98,\s*172,\s*255\);?"[^>]*>(.*?)</span>'
+                        zaapi_match = re.search(zaapi_regex, raw_html, re.IGNORECASE | re.DOTALL)
+
+                        # Regex standard pour "Zaap"
                         zaap_regex = r'Zaap.*?<span[^>]*style="color:\s*rgb\(98,\s*172,\s*255\);?"[^>]*>(.*?)</span>'
                         zaap_match = re.search(zaap_regex, raw_html, re.IGNORECASE | re.DOTALL)
-                        if zaap_match:
+
+                        if zaapi_match:
+                            self.next_travel_type = "Zaapi Shortcut"
+                            raw_name = zaapi_match.group(1)
+                            self.next_travel_zaap_name = re.sub(r'<[^>]+>', '', raw_name).strip()
+                        elif zaap_match:
                             self.next_travel_type = "Zaap Shortcut"
                             raw_name = zaap_match.group(1)
                             self.next_travel_zaap_name = re.sub(r'<[^>]+>', '', raw_name).strip()
@@ -290,10 +373,17 @@ class MainController(QObject):
                 current_type = self.next_travel_type
                 current_zaap = self.next_travel_zaap_name
                 current_cmd = self.next_travel_command
-                if current_type == "Zaap Shortcut":
+
+                if current_type == "Zaapi Shortcut":
+                    log_name = f" [{current_zaap}]" if current_zaap else ""
+                    logger.info(f"✨ Macro Zaapi détectée{log_name} -> Lancement Séquence H+Clic+Zaapi")
+                    self.run_threaded(lambda: self._macro_zaapi_task(current_zaap, current_cmd))
+
+                elif current_type == "Zaap Shortcut":
                     log_name = f" [{current_zaap}]" if current_zaap else ""
                     logger.info(f"✨ Macro Zaap détectée{log_name} -> Lancement Séquence H+Clic")
                     self.run_threaded(lambda: self._macro_h_click_task(current_zaap, current_cmd))
+
                 elif current_cmd:
                     logger.info(f"🚀 Déplacement auto (Classique) : {current_cmd}")
                     self.run_threaded(lambda: self.macro_travel_to_stored_command(current_cmd))
