@@ -89,4 +89,4 @@ class KeyboardScripts:
             inp_up.ui.ki.wScan = ord(char)
             inp_up.ui.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
             self._send_input(inp_up)
-            time.sleep(0.02)
+            # time.sleep(0.001)

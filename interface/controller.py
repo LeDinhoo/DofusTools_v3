@@ -18,12 +18,15 @@ from scripts.ocr_features import OcrScripts
 from scripts.overlay_features import OverlayScripts
 from scripts.snipping_tool import SnippingTool
 
+# Import du nouveau parser sémantique
+from interface.panels.guide_parser import GuideParser
+
 logger = logging.getLogger(__name__)
 
 
 class MainController(QObject):
     """
-    Contrôleur principal adapté pour PyQt6 avec gestion des signaux pour le Thread-Safety.
+    Contrôleur principal : Orchestre les interactions entre l'UI, le Parser et le Jeu.
     """
 
     # --- DÉFINITION DES SIGNAUX ---
@@ -37,27 +40,35 @@ class MainController(QObject):
         super().__init__()
         self.view = view_app
 
+        # États de navigation
         self.next_travel_command = None
-        self.next_travel_type = "classique"
+        self.next_travel_type = "classic"
         self.next_travel_zaap_name = None
+        self.next_travel_arg2 = None  # Sert d'indice de ville (ex: 'potion_bonta', 'Brakmar')
+
         self.ocr_zone_rect = None
         self.is_restoring_session = False
         self.is_macro_running = False
         self.is_auto_travel_enabled = True
-        self.is_keyboard_nav_enabled = True  # NOUVEAU : État de la navigation clavier
+        self.is_keyboard_nav_enabled = True
 
-        self.parser = ParserScripts()
+        # Initialisation des parsers
+        self.parser_io = ParserScripts()  # Chargement/Sauvegarde JSON
+        self.semantic_parser = GuideParser()  # Analyse intelligente des étapes
+
+        # Scripts bas niveau
         self.mouse = MouseScripts()
         self.system = SystemScripts()
         self.window = WindowScripts()
         self.network = NetworkFeatures()
 
         self.keyboard = KeyboardScripts(window_manager=self.window)
-        self.session = SessionFeatures(parser_script=self.parser)
+        self.session = SessionFeatures(parser_script=self.parser_io)
         self.ocr = OcrScripts()
         self.overlay = OverlayScripts()
         self.snipping = SnippingTool()
 
+        # Connexions Signaux
         self.sig_open_guide.connect(self._open_guide_slot)
         self.sig_refresh_ui.connect(self.refresh_ui_state)
         self.sig_log_error.connect(lambda msg: logger.error(msg))
@@ -65,7 +76,7 @@ class MainController(QObject):
         self.sig_bind_result.connect(self._handle_bind_result_slot)
 
     def startup(self):
-        logger.info("Contrôleur démarré (PyQt6). Restauration de la session...")
+        logger.info("Contrôleur démarré. Restauration de la session...")
         self.restore_session()
 
     def run_threaded(self, func):
@@ -76,6 +87,8 @@ class MainController(QObject):
                 logger.error(f"Erreur dans le thread {func.__name__} : {e}", exc_info=True)
 
         threading.Thread(target=safe_wrapper, daemon=True).start()
+
+    # --- TOGGLES & ACTIONS UI ---
 
     def toggle_auto_travel(self):
         self.is_auto_travel_enabled = not self.is_auto_travel_enabled
@@ -93,11 +106,11 @@ class MainController(QObject):
         try:
             filename, _ = QFileDialog.getOpenFileName(self.view, "Ouvrir Config", "", "JSON Files (*.json)")
             if filename:
-                data = self.parser.load_file(filename)
+                data = self.parser_io.load_file(filename)
                 if data:
-                    archive = self.parser.save_guide_to_library(data)
+                    archive = self.parser_io.save_guide_to_library(data)
                     final = archive if archive else filename
-                    steps = self.parser.get_steps_list(data)
+                    steps = self.parser_io.get_steps_list(data)
                     if steps:
                         name = data.get("name", os.path.basename(filename))
                         gid = data.get("id")
@@ -188,10 +201,63 @@ class MainController(QObject):
     def action_macro_h_click_wrapper(self):
         self.run_threaded(lambda: self._macro_h_click_task(None, None))
 
+    # --- AIDES AU VOYAGE & CLAVIER ---
+
+    def _execute_travel_sequence(self, cmd_string):
+        """
+        Version classique : Tape la commande caractère par caractère.
+        Plus lent mais plus fiable (évite les bugs de copier-coller).
+        """
+        logger.info(f"⌨️ Séquence chat (Frappe) : {cmd_string}")
+
+        # 1. Ouvre le chat
+        self.keyboard.press_space()
+        time.sleep(0.1)
+
+        # 2. Tape le texte
+        self.keyboard.send_text(cmd_string)
+        time.sleep(0.1)
+
+        # 3. Valide
+        self.keyboard.press_enter()
+        time.sleep(0.3)
+        self.keyboard.press_enter()
+
+    def _trigger_potion_action(self, potion_cmd):
+        """
+        Gère les raccourcis claviers pour les potions.
+        Bonta -> '-' (VK_OEM_MINUS : 0xBD)
+        Brakmar -> '=' (VK_OEM_PLUS : 0xBB)
+        """
+        self.window.ensure_focus()
+        time.sleep(0.1)
+
+        if potion_cmd == "potion_bonta":
+            logger.info("🧪 Potion Bonta : Double appui sur '-'")
+            self.keyboard.press_key(0xBD)
+            time.sleep(0.15)
+            self.keyboard.press_key(0xBD)
+            time.sleep(0.15)
+            self.keyboard.press_key(0xBD)
+
+        elif potion_cmd == "potion_brakmar":
+            logger.info("🧪 Potion Brakmar : Double appui sur '='")
+            self.keyboard.press_key(0xBB)
+            time.sleep(0.15)
+            self.keyboard.press_key(0xBB)
+            time.sleep(0.15)
+            self.keyboard.press_key(0xBB)
+
+        else:
+            # Fallback (Frigost, Sufokia ou custom) -> Commande chat
+            self._execute_travel_sequence(f"/use {potion_cmd}")
+
+    # --- MACROS ---
+
     def _macro_h_click_task(self, zaap_name, travel_cmd):
+        """Macro Zaap Classique : H -> Clic Havre-Sac -> Saisie Nom -> Travel"""
         logger.info(f"⚔️ MACRO ZAAP START: {zaap_name}")
         if not self.window.bound_handle:
-            logger.warning("⚠️ MACRO ABANDONNÉE : Aucune fenêtre liée.")
             return
         self.window.ensure_focus()
         try:
@@ -213,145 +279,159 @@ class MainController(QObject):
         except Exception as e:
             logger.error(f"❌ Erreur Macro H+Clic Zaap : {e}", exc_info=True)
 
-    def _macro_zaapi_task(self, zaapi_name, travel_cmd):
+    def _handle_zaapi_interface(self, zaapi_name, travel_cmd):
+        """Méthode commune pour gérer l'interface Zaapi une fois ouverte"""
+        if not zaapi_name: return
+
+        # Filtres Catégories
+        if "Atelier" in zaapi_name:
+            self.mouse.click_at(1111, 468)
+        elif "Hôtel" in zaapi_name:
+            self.mouse.click_at(1286, 468)
+        else:
+            self.mouse.click_at(1456, 468)  # Divers
+        time.sleep(0.3)
+
+        # Clic Recherche
+        self.mouse.click_at(1008, 529)
+        time.sleep(0.2)
+
+        # Saisie
+        logger.info(f"✍️ Saisie : {zaapi_name}")
+        self.keyboard.send_text(zaapi_name)
+        time.sleep(0.3)
+        self.keyboard.press_enter()
+
+        # Travel final
+        if travel_cmd and "Milice" not in zaapi_name:
+            logger.info("⏳ Attente 2.0s pour travel...")
+            time.sleep(2.0)
+            self._execute_travel_sequence(travel_cmd)
+
+    def _macro_zaapi_interact_world(self, zaapi_name, travel_cmd, city_hint):
         """
-        Macro spécifique pour les Zaapis :
-        1. Havre-Sac (H) -> Clic Zaap -> Écrit 'Bonta' -> Entrée (pour aller au hub Zaapi)
-        2. Clic sur l'onglet Zaapi (1914, 285)
-        3. Filtrage catégorie (Atelier/Hôtel/Divers)
-        4. Réactivation du champ de recherche (1008, 529)
-        5. Saisie du nom du Zaapi -> Entrée
-        6. Check 'Milice' pour skip travel
+        [OPTIMISÉ] Clic DIRECT sur l'objet Zaapi de la map (Bonta/Brakmar).
         """
-        logger.info(f"⚔️ MACRO ZAAPI START: {zaapi_name}")
-        if not self.window.bound_handle:
-            logger.warning("⚠️ MACRO ABANDONNÉE : Aucune fenêtre liée.")
+        logger.info(f"⚔️ INTERACTION ZAAPI DIRECTE : {zaapi_name} ({city_hint})")
+
+        ZAAPI_WORLD_POS = {
+            "potion_brakmar": (1216, 405),
+            "potion_bonta": (790, 448),
+        }
+
+        coords = ZAAPI_WORLD_POS.get(city_hint)
+        if not coords:
+            logger.warning(f"⚠️ Pas de coords world pour {city_hint}, fallback Legacy.")
+            self._macro_zaapi_legacy(zaapi_name, travel_cmd)
             return
+
+        logger.info(f"🖱️ Clic objet Zaapi : {coords}")
+        self.mouse.click_at(*coords)
+        time.sleep(2)
+
+        self._handle_zaapi_interface(zaapi_name, travel_cmd)
+
+    def _macro_zaapi_legacy(self, zaapi_name, travel_cmd):
+        """
+        [STANDARD] H -> Zaap Havre-Sac -> Bonta -> Marche vers Zaapi -> Interface.
+        Pour Frigost, Sufokia, etc.
+        """
+        logger.info(f"⚔️ MACRO ZAAPI LEGACY (H+Travel) : {zaapi_name}")
+        if not self.window.bound_handle: return
         self.window.ensure_focus()
+
         try:
-            # --- ÉTAPE 1 : Voyage vers Bonta (Hub Zaapi) ---
-            self.keyboard.press_key(0x48)  # Touche H
+            # 1. Havre-Sac
+            self.keyboard.press_key(0x48)  # H
             time.sleep(1.7)
-            self.mouse.click_at(719, 497)  # Clic sur le Zaap du Havre-Sac
+            self.mouse.click_at(719, 497)  # Zaap Havre-Sac
             time.sleep(0.3)
 
-            # On force la destination "Bonta" pour accéder aux Zaapis
+            # 2. Go Hub Bonta
             logger.info("✍️ Saisie destination hub : Bonta")
             self.keyboard.send_text("Bonta")
             time.sleep(0.3)
             self.keyboard.press_enter()
 
             logger.info("⏳ Attente téléportation (2.5s)...")
-            time.sleep(2.5)  # Temps pour charger la map de Bonta
+            time.sleep(2.5)
 
-            # --- ÉTAPE 2 : Interface Zaapi ---
-            logger.info(f"🖱️ Clic onglet Zaapi (1914, 285)")
-            self.mouse.click_at(1914, 285)  # Changement d'onglet vers Zaapi
-            time.sleep(1.8)
+            # 3. Clic Onglet Zaapi (Depuis le Zaap de Bonta)
+            logger.info("🖱️ Clic onglet Zaapi (1914, 285)")
+            self.mouse.click_at(1914, 285)
+            time.sleep(1.5)
 
-            # --- ÉTAPE 3 : Filtrage par catégorie ---
-            if zaapi_name:
-                if "Atelier" in zaapi_name:
-                    logger.info("🖱️ Filtre : Atelier (1111, 468)")
-                    self.mouse.click_at(1111, 468)
-                elif "Hôtel" in zaapi_name:
-                    logger.info("🖱️ Filtre : Hôtel (1286, 468)")
-                    self.mouse.click_at(1286, 468)
-                else:
-                    logger.info("🖱️ Filtre : Divers (1456, 468)")
-                    self.mouse.click_at(1456, 468)
-                time.sleep(0.3)
+            # 4. Gestion Interface
+            self._handle_zaapi_interface(zaapi_name, travel_cmd)
 
-                # --- ÉTAPE 4 : Réactivation du champ de recherche ---
-                logger.info("🖱️ Clic Input Recherche (1008, 529)")
-                self.mouse.click_at(1008, 529)
-                time.sleep(0.2)
-
-                # --- ÉTAPE 5 : Saisie ---
-                logger.info(f"✍️ Saisie du Zaapi : {zaapi_name}")
-                self.keyboard.send_text(zaapi_name)
-                time.sleep(0.3)
-                self.keyboard.press_enter()
-
-            # --- ÉTAPE 6 : Travel final (si nécessaire) ---
-            if travel_cmd:
-                # Si la destination est "Milice", on ne fait pas le travel car le Zaapi est déjà sur la map
-                if zaapi_name and "Milice" in zaapi_name:
-                    logger.info("🛑 Destination 'Milice' détectée : Travel annulé (déjà sur place).")
-                else:
-                    logger.info("⏳ Attente 2.0s pour travel...")
-                    time.sleep(2.0)
-                    logger.info(f"🚀 Enchaînement Travel : {travel_cmd}")
-                    self._execute_travel_sequence(travel_cmd)
-
-            logger.info("✅ MACRO ZAAPI END")
         except Exception as e:
-            logger.error(f"❌ Erreur Macro Zaapi : {e}", exc_info=True)
+            logger.error(f"❌ Erreur Legacy Zaapi : {e}")
 
-    def _execute_travel_sequence(self, cmd_string):
-        logger.info(f"⌨️ Séquence chat : {cmd_string}")
-        self.keyboard.press_space()
-        time.sleep(0.1)
-        self.keyboard.send_text(cmd_string)
-        time.sleep(0.1)
-        self.keyboard.press_enter()
-        time.sleep(0.3)
-        self.keyboard.press_enter()
+    def _macro_potion_zaapi_sequence(self, potion_cmd, zaapi_name, final_cmd):
+        """
+        Séquence Optimisée Bonta/Brakmar : Potion -> Clic World -> Interface
+        """
+        logger.info(f"🧪 SEQUENCE OPTIMISÉE : {potion_cmd} -> {zaapi_name}")
+        if not self.window.bound_handle: return
+        self.window.ensure_focus()
+
+        try:
+            self.is_macro_running = True
+
+            # 1. Potion (Raccourci)
+            self._trigger_potion_action(potion_cmd)
+
+            logger.info("⏳ Attente chargement map (4.0s)...")
+            time.sleep(1.5)
+
+            # 2. Clic sur le Zaapi du monde (Bonta/Brakmar)
+            self._macro_zaapi_interact_world(zaapi_name, final_cmd, city_hint=potion_cmd)
+
+        except Exception as e:
+            logger.error(f"❌ Erreur Séquence Potion-Zaapi : {e}", exc_info=True)
+        finally:
+            self.is_macro_running = False
+
+    # --- LOGIQUE PRINCIPALE ---
 
     def refresh_ui_state(self):
         if self.is_restoring_session: return
         try:
             guide = self.session.get_active_guide()
             self.view.ui_guide.update_tabs(self.session.open_guides, self.session.active_index)
+
             if guide:
                 if not guide.get('steps'):
                     logger.warning(f"Le guide '{guide.get('name')}' ne contient aucune étape valide.")
-                self.view.ui_guide.update_content(guide, self.parser)
 
+                self.view.ui_guide.update_content(guide, self.parser_io)
+
+                # Reset états
                 self.next_travel_command = None
-                self.next_travel_type = "classique"
+                self.next_travel_type = "classic"
                 self.next_travel_zaap_name = None
+                self.next_travel_arg2 = None
+
                 current_idx = guide.get('current_idx', 0)
                 steps = guide.get('steps', [])
 
                 if 0 <= current_idx < len(steps):
                     current_step = steps[current_idx]
-                    raw_html = self.parser.get_step_web_text(current_step, clean_html=False)
-                    clean_text = re.sub(r'<[^>]+>', ' ', raw_html).strip()
-                    clean_text = re.sub(r'\s+', ' ', clean_text)
 
-                    travel_match = re.search(r'allez en.*?\[\s*(-?\d+)\s*,\s*(-?\d+)\s*\]', clean_text, re.IGNORECASE)
-                    if travel_match:
-                        x, y = travel_match.group(1), travel_match.group(2)
-                        self.next_travel_command = f"/travel {x},{y}"
+                    # --- NOUVELLE LOGIQUE PARSER ---
+                    analysis = self.semantic_parser.parse_step(current_step)
 
-                        # DÉTECTION : Zaapi vs Zaap
-                        # On cherche "Zaapi" spécifiquement en premier
-                        zaapi_regex = r'Zaapi.*?<span[^>]*style="color:\s*rgb\(98,\s*172,\s*255\);?"[^>]*>(.*?)</span>'
-                        zaapi_match = re.search(zaapi_regex, raw_html, re.IGNORECASE | re.DOTALL)
+                    self.next_travel_command = analysis['travel_cmd']
+                    self.next_travel_type = analysis['macro_type']
+                    self.next_travel_zaap_name = analysis['macro_arg']
+                    self.next_travel_arg2 = analysis['macro_arg2']
 
-                        # Regex standard pour "Zaap"
-                        zaap_regex = r'Zaap.*?<span[^>]*style="color:\s*rgb\(98,\s*172,\s*255\);?"[^>]*>(.*?)</span>'
-                        zaap_match = re.search(zaap_regex, raw_html, re.IGNORECASE | re.DOTALL)
-
-                        if zaapi_match:
-                            self.next_travel_type = "Zaapi Shortcut"
-                            raw_name = zaapi_match.group(1)
-                            self.next_travel_zaap_name = re.sub(r'<[^>]+>', '', raw_name).strip()
-                        elif zaap_match:
-                            self.next_travel_type = "Zaap Shortcut"
-                            raw_name = zaap_match.group(1)
-                            self.next_travel_zaap_name = re.sub(r'<[^>]+>', '', raw_name).strip()
-                        else:
-                            self.next_travel_type = "classique"
-                            self.next_travel_zaap_name = None
-
-                        log_msg = f"🔔 Commande détectée ({self.next_travel_type}"
-                        if self.next_travel_zaap_name: log_msg += f" -> {self.next_travel_zaap_name}"
-                        log_msg += f") : {travel_match.group(0).strip()}"
-                        logger.info(log_msg)
+                    if self.next_travel_command or self.next_travel_type != "classic":
+                        logger.info(f"Analyzed Step: Type={self.next_travel_type}, "
+                                    f"Arg={self.next_travel_zaap_name}, "
+                                    f"Cmd={self.next_travel_command}")
             else:
-                self.view.ui_guide.update_content(None, self.parser)
+                self.view.ui_guide.update_content(None, self.parser_io)
         except Exception as e:
             logger.error(f"Erreur refresh UI: {e}", exc_info=True)
 
@@ -366,34 +446,45 @@ class MainController(QObject):
         if self.is_macro_running:
             logger.warning("⏳ Macro en cours, veuillez patienter...")
             return
+
         guide = self.session.get_active_guide()
         if guide and guide['current_idx'] < len(guide['steps']) - 1:
-            cmd_to_run = self.next_travel_command
+
+            # --- GESTION DU VOYAGE AUTOMATIQUE ---
             if self.is_auto_travel_enabled:
-                current_type = self.next_travel_type
-                current_zaap = self.next_travel_zaap_name
-                current_cmd = self.next_travel_command
+                t_type = self.next_travel_type
+                arg1 = self.next_travel_zaap_name
+                arg2 = self.next_travel_arg2
+                cmd = self.next_travel_command
 
-                if current_type == "Zaapi Shortcut":
-                    log_name = f" [{current_zaap}]" if current_zaap else ""
-                    logger.info(f"✨ Macro Zaapi détectée{log_name} -> Lancement Séquence H+Clic+Zaapi")
-                    self.run_threaded(lambda: self._macro_zaapi_task(current_zaap, current_cmd))
+                if t_type == "potion_zaapi":
+                    # CAS OPTIMISÉ (Bonta/Brakmar) : Potion -> World Click
+                    self.run_threaded(lambda: self._macro_potion_zaapi_sequence(arg2, arg1, cmd))
 
-                elif current_type == "Zaap Shortcut":
-                    log_name = f" [{current_zaap}]" if current_zaap else ""
-                    logger.info(f"✨ Macro Zaap détectée{log_name} -> Lancement Séquence H+Clic")
-                    self.run_threaded(lambda: self._macro_h_click_task(current_zaap, current_cmd))
+                elif t_type == "zaapi":
+                    # CAS STANDARD (Frigost/Sufokia) : Legacy H+Travel
+                    logger.info(f"✨ Macro Zaapi Standard (Legacy) -> {arg1}")
+                    self.run_threaded(lambda: self._macro_zaapi_legacy(arg1, cmd))
 
-                elif current_cmd:
-                    logger.info(f"🚀 Déplacement auto (Classique) : {current_cmd}")
-                    self.run_threaded(lambda: self.macro_travel_to_stored_command(current_cmd))
-            elif cmd_to_run:
-                log_detail = f" ({self.next_travel_type})"
-                if self.next_travel_zaap_name: log_detail += f" [{self.next_travel_zaap_name}]"
-                logger.info(f"⚠️ Auto-travel désactivé. Commande ignorée{log_detail} : {cmd_to_run}")
+                elif t_type == "zaap":
+                    # Cas Zaap
+                    logger.info(f"✨ Macro Zaap détectée -> {arg1}")
+                    self.run_threaded(lambda: self._macro_h_click_task(arg1, cmd))
+
+                elif t_type == "potion_direct":
+                    # Cas Potion directe (Raccourci)
+                    self.run_threaded(lambda: self._trigger_potion_action(cmd))
+
+                elif cmd:
+                    # Cas classique (/travel)
+                    logger.info(f"🚀 Déplacement auto (Classique) : {cmd}")
+                    self.run_threaded(lambda: self.macro_travel_to_stored_command(cmd))
+
+            # Passage étape suivante
             guide['current_idx'] += 1
             self.session.save_current_progress()
             self.refresh_ui_state()
+
         elif guide and guide['current_idx'] == len(guide['steps']) - 1:
             logger.info("ℹ️ Dernière étape du guide atteinte.")
             self.refresh_ui_state()
@@ -475,7 +566,7 @@ class MainController(QObject):
 
     def _load_local(self, path, gid):
         try:
-            data = self.parser.load_file(path)
+            data = self.parser_io.load_file(path)
             if data:
                 self.sig_open_guide.emit(data, path)
             else:
@@ -490,7 +581,7 @@ class MainController(QObject):
                 self.sig_log_error.emit(f"❌ Erreur téléchargement guide {gid} : {err}")
                 return
             if data:
-                path = self.parser.save_guide_to_library(data)
+                path = self.parser_io.save_guide_to_library(data)
                 if path:
                     logger.info(f"Guide {gid} sauvegardé dans : {path}")
                     self.sig_open_guide.emit(data, path)
@@ -501,7 +592,7 @@ class MainController(QObject):
 
     def _open_guide_slot(self, data, path):
         try:
-            steps = self.parser.get_steps_list(data)
+            steps = self.parser_io.get_steps_list(data)
             if not steps:
                 logger.error(f"Le guide téléchargé/chargé ne contient aucune étape valide ! Path: {path}")
                 return
@@ -521,8 +612,9 @@ class MainController(QObject):
             if guides:
                 for g in guides:
                     if g.get('file_path') and os.path.exists(g['file_path']):
-                        d = self.parser.load_file(g['file_path'])
-                        if d: self.session.add_guide(g['name'], self.parser.get_steps_list(d), g['file_path'], g['id'])
+                        d = self.parser_io.load_file(g['file_path'])
+                        if d: self.session.add_guide(g['name'], self.parser_io.get_steps_list(d), g['file_path'],
+                                                     g['id'])
                 self.session.set_active_index(idx)
             last_char = self.session.get_last_character()
 
